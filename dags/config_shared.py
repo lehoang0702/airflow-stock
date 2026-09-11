@@ -73,14 +73,37 @@ TICKERS_META = {
     'LIN': {'name': 'Linde plc', 'sector': 'Vật liệu Công nghiệp'},
 }
 
-# 4. Chỉ số thị trường vĩ mô tham chiếu (Macro Benchmarks)
+# 4. Chỉ số thị trường vĩ mô & Liên thị trường mở rộng (Inter-Market Benchmarks)
 MACRO_TICKERS = {
-    'SPY': 'spy',      # S&P 500 ETF
-    'QQQ': 'qqq',      # Nasdaq 100 ETF
-    '^VIX': 'vix',     # CBOE Volatility Index
-    '^TNX': 'tnx'      # 10Y US Treasury Yield
+    'SPY': 'spy',           # S&P 500 ETF (Chỉ số thị trường chung)
+    'QQQ': 'qqq',           # Nasdaq 100 ETF (Công nghệ & Đổi mới)
+    '^VIX': 'vix',          # CBOE Volatility Index (Thước đo nỗi sợ thị trường)
+    '^TNX': 'tnx',          # 10Y US Treasury Yield (Lợi suất trái phiếu chính phủ Mỹ 10 năm)
+    'GC=F': 'gold',         # Vàng tương lai (Gold Futures - Tài sản trú ẩn an toàn)
+    'CL=F': 'oil',          # Dầu thô WTI (Crude Oil - Năng lượng & Lạm phát)
+    'DX-Y.NYB': 'dxy',      # US Dollar Index (Chỉ số sức mạnh đồng Đô la Mỹ)
+    'HYG': 'hyg',           # iShares High Yield Corporate Bond (Khẩu vị rủi ro tín dụng)
 }
 
-# 5. Lịch chạy tự động tối ưu cho thị trường chứng khoán Mỹ
+# 5. Danh mục các trường dữ liệu Báo cáo Tài chính & Phân tích Cơ bản (Fundamental Metrics)
+FUNDAMENTAL_FIELDS = [
+    'trailingPE',           # P/E 12 tháng qua
+    'forwardPE',            # P/E dự phóng
+    'priceToBook',          # Chỉ số P/B
+    'returnOnEquity',       # Tỷ suất sinh lời trên vốn chủ sở hữu (ROE)
+    'profitMargins',        # Biên lợi nhuận ròng (Profit Margin)
+    'debtToEquity',         # Tỷ lệ Nợ / Vốn chủ sở hữu
+    'beta',                 # Hệ số rủi ro hệ thống Beta
+    'marketCap',            # Vốn hóa thị trường
+]
+
+# 6. Cấu hình khung thời gian nến Intraday (Độ mịn cao)
+INTRADAY_INTERVAL = '1h'    # Nến 1 giờ
+INTRADAY_PERIOD = '730d'    # 730 ngày gần nhất (tối đa Yahoo Finance hỗ trợ cho nến 1h)
+
+# 7. Cấu hình lịch sử dữ liệu chuẩn cho Machine Learning
+DATASET_HISTORY_PERIOD = '15y'  # Lịch sử 15 năm (2011 đến nay)
+
+# 8. Lịch chạy tự động tối ưu cho thị trường chứng khoán Mỹ
 # 22:00 UTC (05:00 sáng VN) từ Thứ Hai đến Thứ Sáu (sau khi phiên NYSE/NASDAQ đóng cửa)
 DEFAULT_CRON_SCHEDULE = '0 22 * * 1-5'

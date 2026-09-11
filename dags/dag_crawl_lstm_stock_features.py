@@ -22,7 +22,7 @@ TICKERS_20 = [
     'NEE', 'MCD', 'LIN', 'KO', 'JPM', 'CAT', 'BA', 'XOM', 'JNJ', 'CVX'
 ]
 
-MACRO_TICKERS = ['SPY', 'QQQ', '^VIX', '^TNX']
+MACRO_TICKERS = ['SPY', 'QQQ', '^VIX', '^TNX', 'GC=F', 'CL=F', 'DX-Y.NYB']
 
 SECTOR_MAP = {
     'AAPL': 'Technology', 'MSFT': 'Technology', 'NVDA': 'Technology', 'GOOGL': 'Technology',
@@ -102,7 +102,7 @@ def crawl_and_extract_lstm_features(**context):
     date_nodash = datetime.now().strftime("%Y%m%d")
     logging.info("🚀 Bắt đầu cào dữ liệu vĩ mô và 20 mã cổ phiếu (Robust Dual-Engine)...")
 
-    def fetch_stock_raw(ticker, period="5y", retries=3):
+    def fetch_stock_raw(ticker, period="15y", retries=3):
         for attempt in range(1, retries + 1):
             try:
                 t_obj = yf.Ticker(ticker)
@@ -121,15 +121,15 @@ def crawl_and_extract_lstm_features(**context):
                 time.sleep(2 * attempt)
         return pd.DataFrame()
 
-    # 1. CÀO DỮ LIỆU VĨ MÔ AN TOÀN (Dùng period="5y")
+    # 1. CÀO DỮ LIỆU VĨ MÔ AN TOÀN (Dùng period="15y")
     macro_dfs = {}
     for m_ticker in MACRO_TICKERS:
         try:
-            hist = fetch_stock_raw(m_ticker, period="5y")
+            hist = fetch_stock_raw(m_ticker, period="15y")
             if not hist.empty:
                 hist = hist.reset_index()
                 hist['Date'] = pd.to_datetime(hist['Date']).dt.tz_localize(None).dt.normalize()
-                clean_name = m_ticker.replace('^', '').lower()
+                clean_name = m_ticker.replace('^', '').replace('=', '').replace('-', '').replace('.', '').lower()
                 hist[f'{clean_name}_close'] = hist['Close']
                 hist[f'{clean_name}_ret'] = hist['Close'].pct_change()
                 macro_dfs[m_ticker] = hist[['Date', f'{clean_name}_close', f'{clean_name}_ret']].dropna()
@@ -155,7 +155,7 @@ def crawl_and_extract_lstm_features(**context):
     failed_tickers = []
     for ticker in TICKERS_20:
         try:
-            hist = fetch_stock_raw(ticker, period="5y")
+            hist = fetch_stock_raw(ticker, period="15y")
 
             if hist.empty or len(hist) < 50:
                 logging.warning(f"⚠️ Dữ liệu {ticker} quá ngắn hoặc rỗng từ Yahoo.")
@@ -227,6 +227,22 @@ def crawl_and_extract_lstm_features(**context):
         bucket_name=BUCKET_NAME,
         replace=True
     )
+
+    # Xuất định dạng Apache Parquet (nén Snappy) chuẩn Big Data
+    try:
+        parquet_buf = io.BytesIO()
+        df_final.to_parquet(parquet_buf, engine='pyarrow', compression='snappy', index=False)
+        parquet_key = minio_key.replace('.csv', '.parquet')
+        s3_hook.load_bytes(
+            bytes_data=parquet_buf.getvalue(),
+            key=parquet_key,
+            bucket_name=BUCKET_NAME,
+            replace=True
+        )
+        logging.info(f"📦 Đã xuất song song định dạng Parquet cho LSTM: {parquet_key}")
+    except Exception as pq_err:
+        logging.warning(f"⚠️ Không thể xuất Parquet cho LSTM (vẫn giữ CSV): {pq_err}")
+
     logging.info(f"🎉 ĐÃ LƯU THÀNH CÔNG DATASET LSTM LÊN MINIO: {minio_key} ({len(df_final)} dòng, {unique_tickers} mã)")
 
     # === KIỂM ĐỊNH CHẤT LƯỢNG DỮ LIỆU (DATA QUALITY MLOPS) ===

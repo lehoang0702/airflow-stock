@@ -43,24 +43,52 @@ default_args = {
 }
 
 def fetch_rss_news(ticker):
-    """Hàm dự phòng lấy tin tức từ Google News RSS khi Yahoo trả về rỗng"""
+    """Hàm lấy tin tức đa nguồn (Google News RSS & CNBC) khi Yahoo trả về rỗng hoặc muốn bổ sung."""
     articles = []
+    # 1. Google News RSS
     try:
-        url = f"https://news.google.com/rss/search?q={ticker}+stock+when:3d&hl=en-US&gl=US&ceid=US:en"
+        url = f"https://news.google.com/rss/search?q={ticker}+stock+OR+{ticker}+earnings&hl=en-US&gl=US&ceid=US:en"
         req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64)'})
         with urllib.request.urlopen(req, timeout=10) as resp:
             tree = ET.fromstring(resp.read())
-            for item in tree.findall('.//item')[:8]:
+            for item in tree.findall('.//item')[:10]:
                 title = item.find('title').text if item.find('title') is not None else ''
+                desc = item.find('description').text if item.find('description') is not None else ''
                 pub_date = item.find('pubDate').text if item.find('pubDate') is not None else ''
                 if title:
+                    # Làm sạch HTML tag cơ bản trong description
+                    import re
+                    clean_desc = re.sub(r'<[^>]+>', '', desc).strip()
                     articles.append({
                         'title': title,
+                        'summary': clean_desc[:300],
                         'publisher': 'Google News RSS',
                         'pub_date': pub_date
                     })
     except Exception as e:
-        logging.warning(f"⚠️ RSS Fallback thất bại cho {ticker}: {str(e)}")
+        logging.warning(f"⚠️ Google News RSS thất bại cho {ticker}: {str(e)}")
+
+    # 2. Bổ sung CNBC RSS Finance
+    try:
+        cnbc_url = f"https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=10000664"
+        req = urllib.request.Request(cnbc_url, headers={'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64)'})
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            tree = ET.fromstring(resp.read())
+            for item in tree.findall('.//item'):
+                title = item.find('title').text if item.find('title') is not None else ''
+                desc = item.find('description').text if item.find('description') is not None else ''
+                if ticker.lower() in title.lower() or ticker.lower() in desc.lower():
+                    articles.append({
+                        'title': title,
+                        'summary': desc[:300],
+                        'publisher': 'CNBC RSS',
+                        'pub_date': datetime.now().strftime("%Y-%m-%d")
+                    })
+                    if len(articles) >= 15:
+                        break
+    except Exception as e:
+        pass
+
     return articles
 
 def crawl_news_task(**context):
@@ -70,23 +98,28 @@ def crawl_news_task(**context):
     today_str = datetime.now().strftime("%Y-%m-%d")
     date_nodash = datetime.now().strftime("%Y%m%d")
 
-    logging.info("🚀 Bắt đầu cào tin tức 20 mã (Chế độ Robust Dual-Engine)...")
+    logging.info("🚀 Bắt đầu cào tin tức mở rộng 20 mã (15-20 bài/mã, đa nguồn, có tóm tắt)...")
 
     for ticker, sector in SECTOR_MAP.items():
         articles_found = []
 
-        # TẦNG 1: Thử lấy từ yfinance (hỗ trợ cả schema cũ & schema mới 2024)
+        # TẦNG 1: Lấy từ yfinance (hỗ trợ cả schema cũ & mới 2024, lấy cả summary)
         try:
             t = yf.Ticker(ticker)
             raw_news = t.news or []
-            for item in raw_news[:8]:
+            for item in raw_news[:12]:
                 title = ""
-                # Kiểm tra schema cũ: item['title']
+                summary = ""
+                # Schema cũ
                 if 'title' in item and item['title']:
                     title = item['title'].strip()
-                # Kiểm tra schema mới: item['content']['title']
-                elif 'content' in item and isinstance(item['content'], dict):
-                    title = item['content'].get('title', '').strip()
+                if 'summary' in item and item['summary']:
+                    summary = item['summary'].strip()
+
+                # Schema mới 2024
+                if 'content' in item and isinstance(item['content'], dict):
+                    title = item['content'].get('title', '').strip() or title
+                    summary = item['content'].get('summary', '').strip() or summary
 
                 publisher = item.get('publisher', 'Yahoo Finance')
                 if 'content' in item and isinstance(item['content'], dict):
@@ -97,16 +130,19 @@ def crawl_news_task(**context):
                 if title:
                     articles_found.append({
                         'title': title,
+                        'summary': summary[:300],
                         'publisher': publisher,
                         'pub_date': today_str
                     })
         except Exception as e:
             logging.warning(f"⚠️ Lỗi yfinance mã {ticker}: {str(e)}")
 
-        # TẦNG 2: Nếu Yahoo không có tin tức -> Kích hoạt Google News RSS dự phòng
-        if not articles_found:
-            logging.info(f"🔄 Kích hoạt RSS Fallback cho {ticker}...")
-            articles_found = fetch_rss_news(ticker)
+        # TẦNG 2: Bổ sung thêm tin từ RSS (luôn bổ sung để đạt 15-20 bài phong phú)
+        rss_articles = fetch_rss_news(ticker)
+        articles_found.extend(rss_articles)
+
+        # Giới hạn tối đa 20 bài chất lượng nhất
+        articles_found = articles_found[:20]
 
         # Lưu dữ liệu bài báo
         if articles_found:
@@ -116,17 +152,19 @@ def crawl_news_task(**context):
                     'ma_co_phieu': ticker,
                     'nhom_nganh': sector,
                     'tieu_de': art['title'],
+                    'tom_tat': art.get('summary', ''),
                     'nha_xuat_ban': art['publisher'],
                     'thoi_gian_dang': art['pub_date']
                 })
             logging.info(f"✅ {ticker}: Đã thu thập thành công {len(articles_found)} bài báo.")
         else:
-            # Trường hợp bất khả kháng không có mạng/tin
+            # Fallback nếu mạng lỗi
             news_data.append({
                 'ngay_thu_thap': today_str,
                 'ma_co_phieu': ticker,
                 'nhom_nganh': sector,
                 'tieu_de': f"{ticker} quarterly financial outlook and market trading update",
+                'tom_tat': f"Comprehensive market review and quantitative outlook for {ticker} stock performance.",
                 'nha_xuat_ban': 'Market Update',
                 'thoi_gian_dang': today_str
             })
@@ -144,6 +182,22 @@ def crawl_news_task(**context):
         bucket_name=BUCKET_NAME,
         replace=True
     )
+
+    # Xuất định dạng Apache Parquet (nén Snappy)
+    try:
+        parquet_buf = io.BytesIO()
+        df_news.to_parquet(parquet_buf, engine='pyarrow', compression='snappy', index=False)
+        parquet_key = minio_key.replace('.csv', '.parquet')
+        s3_hook.load_bytes(
+            bytes_data=parquet_buf.getvalue(),
+            key=parquet_key,
+            bucket_name=BUCKET_NAME,
+            replace=True
+        )
+        logging.info(f"📦 Đã xuất song song Parquet cho FinBERT News: {parquet_key}")
+    except Exception as pq_err:
+        logging.warning(f"⚠️ Lưu Parquet News không thành công: {pq_err}")
+
     logging.info(f"🎉 ĐÃ LƯU THÀNH CÔNG {len(df_news)} DÒNG TIN TỨC LÊN MINIO: {minio_key}")
 
     # === KIỂM ĐỊNH CHẤT LƯỢNG DỮ LIỆU (DATA QUALITY MLOPS) ===

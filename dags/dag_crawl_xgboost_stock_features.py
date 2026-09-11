@@ -50,12 +50,16 @@ TICKERS = {
     'LIN': {'name': 'Linde', 'sector': 'Materials'}
 }
 
-# Macro Benchmarks
+# Macro & Inter-Market Benchmarks
 MACRO_TICKERS = {
     'SPY': 'spy',      # S&P 500 ETF
     'QQQ': 'qqq',      # Nasdaq 100 ETF
     '^VIX': 'vix',     # CBOE Volatility Index
-    '^TNX': 'tnx'      # 10Y US Treasury Yield
+    '^TNX': 'tnx',     # 10Y US Treasury Yield
+    'GC=F': 'gold',    # Gold Futures (Tài sản trú ẩn an toàn)
+    'CL=F': 'oil',     # WTI Crude Oil (Năng lượng & Lạm phát)
+    'DX-Y.NYB': 'dxy', # US Dollar Index (Sức mạnh USD)
+    'HYG': 'hyg'       # iShares High Yield Corporate Bond (Tín dụng & Rủi ro)
 }
 
 MINIO_CONN_ID = 'minio_conn'
@@ -80,7 +84,7 @@ def clean_df(df_raw: pd.DataFrame) -> pd.DataFrame:
     return df.sort_values('date').reset_index(drop=True)
 
 
-def calculate_technical_indicators(df_stock: pd.DataFrame, df_macro: pd.DataFrame, symbol: str, sector: str):
+def calculate_technical_indicators(df_stock: pd.DataFrame, df_macro: pd.DataFrame, symbol: str, sector: str, fundamentals: dict = None):
     df = df_stock.copy()
     eps = 1e-9
 
@@ -195,6 +199,22 @@ def calculate_technical_indicators(df_stock: pd.DataFrame, df_macro: pd.DataFram
     df['beta_60d_spy'] = df['log_return'].rolling(60).cov(df['spy_log_ret']) / (df['spy_log_ret'].rolling(60).var() + eps)
     df['beta_60d_qqq'] = df['log_return'].rolling(60).cov(df['qqq_log_ret']) / (df['qqq_log_ret'].rolling(60).var() + eps)
 
+    # 8. Inter-Market Dynamics (Vàng, Dầu, Đô la Mỹ, Tín dụng Rủi ro cao)
+    if 'gold_log_ret' in df.columns:
+        df['excess_ret_vs_gold'] = df['log_return'] - df['gold_log_ret']
+        df['corr_gold_30d'] = df['log_return'].rolling(30).corr(df['gold_log_ret']).fillna(0.0)
+    if 'oil_log_ret' in df.columns:
+        df['excess_ret_vs_oil'] = df['log_return'] - df['oil_log_ret']
+    if 'dxy_log_ret' in df.columns:
+        df['corr_dxy_30d'] = df['log_return'].rolling(30).corr(df['dxy_log_ret']).fillna(0.0)
+    if 'hyg_log_ret' in df.columns and 'tnx_log_ret' in df.columns:
+        df['credit_spread_proxy'] = df['hyg_log_ret'] - df['tnx_log_ret']
+
+    # 9. Fundamental Metrics (Chỉ số tài chính cơ bản & định giá)
+    if fundamentals:
+        for k, v in fundamentals.items():
+            df[k] = float(v)
+
     return df
 
 
@@ -202,7 +222,7 @@ def crawl_process_and_upload_to_minio(**kwargs):
     s3_hook = S3Hook(aws_conn_id=MINIO_CONN_ID)
     if not s3_hook.check_for_bucket(MINIO_BUCKET):
         s3_hook.create_bucket(MINIO_BUCKET)
-    def fetch_stock_raw(ticker, period="5y", retries=3):
+    def fetch_stock_raw(ticker, period="15y", retries=3):
         for attempt in range(1, retries + 1):
             try:
                 t = yf.Ticker(ticker)
@@ -221,10 +241,31 @@ def crawl_process_and_upload_to_minio(**kwargs):
                 time.sleep(2 * attempt)
         return pd.DataFrame()
 
-    print("=== 1. TẢI VÀ XỬ LÝ DỮ LIỆU MACRO ===")
+    def fetch_stock_fundamentals(ticker):
+        """Trích xuất tự động các chỉ số tài chính cơ bản & định giá từ Yahoo Finance."""
+        try:
+            t = yf.Ticker(ticker)
+            info = t.info or {}
+            return {
+                'fund_pe_ratio': float(info.get('trailingPE') or info.get('forwardPE') or 0.0),
+                'fund_pb_ratio': float(info.get('priceToBook') or 0.0),
+                'fund_roe': float(info.get('returnOnEquity') or 0.0),
+                'fund_profit_margin': float(info.get('profitMargins') or 0.0),
+                'fund_debt_to_equity': float(info.get('debtToEquity') or 0.0),
+                'fund_beta': float(info.get('beta') or 1.0),
+                'fund_market_cap_log': float(np.log1p(info.get('marketCap') or 1e9)),
+            }
+        except Exception:
+            return {
+                'fund_pe_ratio': 0.0, 'fund_pb_ratio': 0.0, 'fund_roe': 0.0,
+                'fund_profit_margin': 0.0, 'fund_debt_to_equity': 0.0,
+                'fund_beta': 1.0, 'fund_market_cap_log': 0.0
+            }
+
+    print("=== 1. TẢI VÀ XỬ LÝ DỮ LIỆU MACRO & LIÊN THỊ TRƯỜNG (15Y) ===")
     macro_dfs = {}
     for ticker, prefix in MACRO_TICKERS.items():
-        raw = fetch_stock_raw(ticker, period="5y")
+        raw = fetch_stock_raw(ticker, period="15y")
         if raw.empty:
             continue
         cdf = clean_df(raw)
@@ -235,24 +276,25 @@ def crawl_process_and_upload_to_minio(**kwargs):
         raise ValueError("❌ Không thể tải dữ liệu vĩ mô SPY!")
 
     df_macro = macro_dfs['spy']
-    for prefix in ['qqq', 'vix', 'tnx']:
+    for prefix in ['qqq', 'vix', 'tnx', 'gold', 'oil', 'dxy', 'hyg']:
         if prefix in macro_dfs:
             df_macro = pd.merge(df_macro, macro_dfs[prefix], on='date', how='left')
 
     all_dfs = []
     failed_tickers = []
-    print("=== 2. TÍNH TOÁN ĐẶC TRƯNG CHO 20 MÃ ===")
+    print("=== 2. TÍNH TOÁN ĐẶC TRƯNG CHO 20 MÃ (15Y + CHỈ SỐ CƠ BẢN) ===")
     for ticker, info in TICKERS.items():
         name = info['name']
         sector = info['sector']
         print(f"-> [{sector}] {ticker} ({name})...")
-        df_raw = fetch_stock_raw(ticker, period="5y")
+        df_raw = fetch_stock_raw(ticker, period="15y")
         if df_raw.empty:
             print(f"⚠️ Cảnh báo: {ticker} không có dữ liệu từ Yahoo.")
             failed_tickers.append(ticker)
             continue
+        fund_dict = fetch_stock_fundamentals(ticker)
         df_stock = clean_df(df_raw)
-        df_processed = calculate_technical_indicators(df_stock, df_macro, symbol=ticker, sector=sector)
+        df_processed = calculate_technical_indicators(df_stock, df_macro, symbol=ticker, sector=sector, fundamentals=fund_dict)
         all_dfs.append(df_processed)
 
     # Tự động Backfill mã lỗi mạng từ dataset MinIO gần nhất nếu có
@@ -328,7 +370,22 @@ def crawl_process_and_upload_to_minio(**kwargs):
         replace=True
     )
 
-    print(">>> ĐÃ GỬI DUY NHẤT 1 FILE CSV XGBOOST LÊN MINIO THÀNH CÔNG! <<<")
+    # Đẩy thêm định dạng Apache Parquet (nén Snappy) chuẩn Big Data
+    try:
+        parquet_buf = io.BytesIO()
+        clean_df_final.to_parquet(parquet_buf, engine='pyarrow', compression='snappy', index=False)
+        parquet_key = file_name.replace('.csv', '.parquet')
+        s3_hook.load_bytes(
+            bytes_data=parquet_buf.getvalue(),
+            key=parquet_key,
+            bucket_name=MINIO_BUCKET,
+            replace=True
+        )
+        print(f"📦 Đã xuất song song định dạng Parquet lên MinIO: {parquet_key}")
+    except Exception as pq_err:
+        print(f"⚠️ Lưu Parquet không thành công (vẫn duy trì CSV): {pq_err}")
+
+    print(">>> ĐÃ GỬI DATASET XGBOOST LÊN MINIO THÀNH CÔNG! <<<")
 
     # === KIỂM ĐỊNH CHẤT LƯỢNG DỮ LIỆU (DATA QUALITY MLOPS) ===
     try:

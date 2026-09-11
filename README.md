@@ -133,17 +133,18 @@ airflow-minio/
 ├── docker-compose.yaml               # Cấu hình 5 microservices Docker
 ├── requirements.txt                  # Danh mục dependencies Python
 ├── README.md                         # Tài liệu hướng dẫn dự án
-├── dags/                             # 16 Modules DAGs & Utilities
-│   ├── config_shared.py              # Cấu hình tập trung: SECTOR_MAP, TICKERS_META, CRON
+├── dags/                             # 17 Modules DAGs & Utilities
+│   ├── config_shared.py              # Cấu hình tập trung: SECTOR_MAP, TICKERS_META, MACRO, CRON
 │   ├── alert_utils.py                # Tiện ích Telegram callback & send_telegram_safe retry
 │   ├── chart_utils.py                # Sinh biểu đồ phân tích kỹ thuật nến và chỉ báo
 │   ├── data_validator.py             # Quality Gate: Kiểm tra Data Drift, Outliers, Missing
 │   ├── model_registry.py             # Đóng gói Model Artifacts & sinh Model Cards MinIO
 │   ├── model_evaluator.py            # Backtest TimeSeriesSplit CV, ROC-AUC, Brier Score
 │   ├── portfolio_tracker.py          # Quản trị danh mục đầu tư ảo và PnL
-│   ├── dag_crawl_xgboost_stock_features.py   # Cào 85+ kỹ thuật cho GBDT
-│   ├── dag_crawl_lstm_stock_features.py      # Cào chuỗi thời gian nến cho PyTorch
-│   ├── dag_crawl_finbert_news.py             # Cào tin tức tài chính Google News RSS
+│   ├── dag_crawl_xgboost_stock_features.py   # Cào 115+ kỹ thuật, vĩ mô liên thị trường & chỉ số cơ bản
+│   ├── dag_crawl_lstm_stock_features.py      # Cào chuỗi thời gian nến 15 năm cho PyTorch
+│   ├── dag_crawl_finbert_news.py             # Cào tin tức tài chính đa nguồn có tóm tắt
+│   ├── dag_crawl_intraday_features.py        # ⏱️ Cào nến giờ Intraday 1h (>50.000 dòng, lưu Parquet)
 │   ├── dag_xgboost_train_and_predict.py      # Huấn luyện & dự báo XGBoost
 │   ├── dag_lstm_train_and_predict.py         # Huấn luyện & dự báo PyTorch LSTM
 │   ├── dag_finbert_predict.py                # Phân tích sắc thái tài chính FinBERT
@@ -163,9 +164,10 @@ airflow-minio/
 ## 🗄️ Cấu Trúc Bucket Lưu Trữ MinIO (`stock-xgboost-data`)
 
 - `raw-data/`: Dữ liệu giá lịch sử thô và tin tức RSS crawl hàng ngày.
-- `xgboost/`: Features 85+ chỉ báo kỹ thuật và dự báo xác suất của XGBoost.
-- `lstm/`: Tensor chuỗi nến và dự báo xu hướng của PyTorch LSTM.
-- `finbert/`: Điểm số sắc thái cảm xúc tin tức tài chính của FinBERT.
+- `intraday/`: Dataset nến 1 Giờ (1h) độ phân giải cao (`.parquet` & `.csv`, >50.000 records).
+- `xgboost/`: 115+ Features kỹ thuật, liên thị trường, định giá cơ bản (`.parquet` & `.csv`).
+- `lstm/`: Tensor chuỗi nến 15 năm và dự báo xu hướng của PyTorch LSTM (`.parquet` & `.csv`).
+- `finbert/`: Điểm số sắc thái cảm xúc tin tức tài chính của FinBERT (`.parquet` & `.csv`).
 - `ensemble/`: Bảng tổng hợp Master Ensemble 4 phương pháp và file ZIP biểu đồ kỹ thuật.
 - `models/`: Model Artifacts (`.json`, `.pt`), Scalers (`.joblib`), và Model Cards MLOps.
 - `quality/`: Báo cáo Data Quality Gate và kiểm toán chất lượng dữ liệu.

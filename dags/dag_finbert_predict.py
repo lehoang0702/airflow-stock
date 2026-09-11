@@ -70,8 +70,11 @@ def predict_finbert_task(**context):
     for (ticker, sector), group in df_news.groupby(['ma_co_phieu', 'nhom_nganh']):
         scores = []
         pos_count, neg_count, neu_count = 0, 0, 0
-        for title in group['tieu_de'].tolist():
-            inputs = tokenizer(str(title), return_tensors="pt", truncation=True, max_length=128)
+        for idx, row in group.iterrows():
+            title = str(row.get('tieu_de', '') or '')
+            summary = str(row.get('tom_tat', '') or '')
+            text_to_eval = f"{title}. {summary}".strip() if summary and summary != 'nan' else title
+            inputs = tokenizer(text_to_eval, return_tensors="pt", truncation=True, max_length=128)
             with torch.no_grad():
                 logits = model(**inputs).logits
                 probs = torch.nn.functional.softmax(logits, dim=-1)[0].numpy()
