@@ -1,0 +1,28 @@
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+
+# Logs & Airflow state
+logs/
+airflow-webserver.pid
+
+# MinIO data storage
+minio_data/
+
+# Environment & credentials
+.env
+
+# Backups & temp files
+*.save
+*.bak
+*.swp
+*~
+.DS_Store
+
+# IDEs & System
+.vscode/
+.idea/
+.cache/
+.config/
