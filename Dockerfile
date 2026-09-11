@@ -12,4 +12,6 @@ RUN pip install --no-cache-dir \
     transformers \
     matplotlib \
     boto3 \
+    optuna \
+    pytest \
     && pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu

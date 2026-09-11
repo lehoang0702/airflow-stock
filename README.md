@@ -1,5 +1,11 @@
 # 🚀 Quantum Multi-Modal Stock Forecasting & MLOps Platform
 
+[![CI Pipeline](https://github.com/lehoang0702/airflow-stock/actions/workflows/ci.yml/badge.svg)](https://github.com/lehoang0702/airflow-stock/actions/workflows/ci.yml)
+[![Apache Airflow](https://img.shields.io/badge/Airflow-2.8.1-017CEE?style=flat-square&logo=Apache%20Airflow&logoColor=white)](https://airflow.apache.org/)
+[![MinIO](https://img.shields.io/badge/MinIO-S3_Storage-C72C48?style=flat-square&logo=MinIO&logoColor=white)](https://min.io/)
+[![AutoML](https://img.shields.io/badge/AutoML-Optuna_Bayesian-4169E1?style=flat-square)](https://optuna.org/)
+[![Python](https://img.shields.io/badge/Python-3.11-3776AB?style=flat-square&logo=Python&logoColor=white)](https://www.python.org/)
+
 Hệ thống Định lượng & Dự báo Chứng khoán Đa Phương thức kết hợp Trí Tuệ Nhân Tạo (AI) và MLOps hoàn chỉnh trên nền tảng **Apache Airflow**, **MinIO S3**, **PostgreSQL** và **Docker Compose**.
 
 Hệ thống phân tích tự động **20 mã cổ phiếu Blue-chip hàng đầu của Mỹ (S&P 500)** qua 3 nhánh độc lập: **Học máy GBDT (XGBoost)**, **Mạng nơ-ron chuỗi thời gian (PyTorch LSTM)**, và **Mô hình ngôn ngữ tài chính (FinBERT NLP)**, trước khi tổng hợp bằng **Master Ensemble 4 phương pháp** để đưa ra khuyến nghị giao dịch và kế hoạch quản trị rủi ro chi tiết.
@@ -133,11 +139,12 @@ airflow-minio/
 ├── docker-compose.yaml               # Cấu hình 5 microservices Docker
 ├── requirements.txt                  # Danh mục dependencies Python
 ├── README.md                         # Tài liệu hướng dẫn dự án
-├── dags/                             # 17 Modules DAGs & Utilities
+├── dags/                             # 18 Modules DAGs & Utilities
 │   ├── config_shared.py              # Cấu hình tập trung: SECTOR_MAP, TICKERS_META, MACRO, CRON
 │   ├── alert_utils.py                # Tiện ích Telegram callback & send_telegram_safe retry
 │   ├── chart_utils.py                # Sinh biểu đồ phân tích kỹ thuật nến và chỉ báo
 │   ├── data_validator.py             # Quality Gate: Kiểm tra Data Drift, Outliers, Missing
+│   ├── hyperparameter_tuner.py       # 🧠 AutoML: Optuna Bayesian Optimization dò siêu tham số
 │   ├── model_registry.py             # Đóng gói Model Artifacts & sinh Model Cards MinIO
 │   ├── model_evaluator.py            # Backtest TimeSeriesSplit CV, ROC-AUC, Brier Score
 │   ├── portfolio_tracker.py          # Quản trị danh mục đầu tư ảo và PnL

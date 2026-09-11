@@ -123,17 +123,20 @@ def train_and_predict_xgboost_task(**context):
     X_train, y_train = df.loc[train_mask, feature_cols], df.loc[train_mask, 'Target_Std']
     X_test, y_test = df.loc[test_mask, feature_cols], df.loc[test_mask, 'Target_Std']
 
-    model = xgb.XGBClassifier(
-        n_estimators=120,
-        max_depth=3,
-        learning_rate=0.03,
-        subsample=0.75,
-        colsample_bytree=0.75,
-        min_child_weight=3,
-        random_state=42,
-        n_jobs=-1,
-        eval_metric='logloss'
-    )
+    # Tự động tối ưu hóa siêu tham số (Optuna Bayesian Optimization)
+    try:
+        from hyperparameter_tuner import tune_xgboost_hyperparameters, save_tuned_hyperparameters_to_minio, DEFAULT_XGB_PARAMS
+        tuned_params = tune_xgboost_hyperparameters(X_train, y_train, n_trials=10)
+        save_tuned_hyperparameters_to_minio(s3_hook, BUCKET_NAME, tuned_params)
+    except Exception as tune_err:
+        logging.warning(f"⚠️ Không thể chạy hyperparameter tuning ({tune_err}). Sử dụng bộ tham số mặc định.")
+        tuned_params = {
+            'n_estimators': 120, 'max_depth': 3, 'learning_rate': 0.03,
+            'subsample': 0.75, 'colsample_bytree': 0.75, 'min_child_weight': 3,
+            'random_state': 42, 'n_jobs': -1, 'eval_metric': 'logloss'
+        }
+
+    model = xgb.XGBClassifier(**tuned_params)
     model.fit(X_train, y_train)
 
     # Đánh giá Test set — METRICS THỰC SỰ (không clip)
@@ -149,14 +152,14 @@ def train_and_predict_xgboost_task(**context):
     try:
         from model_registry import ModelCard, save_model_to_minio
         model_card = ModelCard(
-            model_name='XGBoost Gradient Boosting Classifier',
+            model_name='XGBoost Gradient Boosting Classifier (AutoML Tuned)',
             model_version=f'v{date_nodash}',
             trained_date=today_str,
             model_type='xgboost',
             dataset_size=int(train_mask.sum()),
             num_features=len(feature_cols),
             num_tickers=int(df['Ticker_Std'].nunique()),
-            hyperparameters={'n_estimators': 120, 'max_depth': 3, 'learning_rate': 0.03},
+            hyperparameters={k: v for k, v in tuned_params.items() if isinstance(v, (int, float, str))},
             metrics={'accuracy': test_acc, 'auc_roc': test_auc},
             feature_columns=feature_cols
         )
