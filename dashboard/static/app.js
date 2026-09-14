@@ -1078,6 +1078,23 @@ function updateTickerPredictions(ticker) {
     setGauge('side-ensemble-val', 'side-ensemble-bar', 50, '--');
   }
 
+  const statusNoteEl = document.getElementById('side-model-status-note');
+  if (statusNoteEl) {
+    if (pred) {
+      statusNoteEl.innerHTML = `
+        <div class="model-status-pill core">
+          ⚡ <strong>20 Cổ Phiếu Cốt Lõi</strong>: Đã đồng bộ đầy đủ kết quả từ 4 mô hình AI (XGBoost, LSTM, FinBERT, Ensemble). Tự động cập nhật mỗi 5 phút hoặc khi bấm [Làm mới].
+        </div>
+      `;
+    } else {
+      statusNoteEl.innerHTML = `
+        <div class="model-status-pill outside">
+          ℹ️ <strong>Mã Tra Cứu Mở Rộng</strong>: Dữ liệu nến & RSI đang trực tuyến từ thị trường. Pipeline 4 mô hình AI hiện chạy định kỳ cho 20 mã lõi. Bạn có thể theo dõi tiến trình hoặc kích hoạt DAG tại <a href="http://localhost:8080" target="_blank" class="airflow-link">Airflow Webserver (Port 8080) ↗</a>. Khi DAG hoàn tất và lưu MinIO, bấm <strong>[Làm mới 🔄]</strong> để đồng bộ.
+        </div>
+      `;
+    }
+  }
+
   updateHeaderActiveTicker();
 }
 

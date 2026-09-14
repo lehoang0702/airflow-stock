@@ -2868,6 +2868,43 @@ body {
   box-shadow: 0 6px 20px rgba(99, 102, 241, 0.6);
 }
 
+/* Model Pipeline Status Note */
+.model-status-note {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.model-status-pill {
+  font-size: 11px;
+  line-height: 1.5;
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+}
+
+.model-status-pill.core {
+  background: rgba(16, 185, 129, 0.1);
+  border: 1px solid rgba(16, 185, 129, 0.3);
+  color: #6EE7B7;
+}
+
+.model-status-pill.outside {
+  background: rgba(99, 102, 241, 0.1);
+  border: 1px solid rgba(99, 102, 241, 0.3);
+  color: #CBD5E1;
+}
+
+.model-status-pill.outside a.airflow-link {
+  color: #A5B4FC;
+  font-weight: 700;
+  text-decoration: underline;
+  transition: color var(--transition-fast);
+}
+
+.model-status-pill.outside a.airflow-link:hover {
+  color: #FFFFFF;
+}
+
 
 
 
