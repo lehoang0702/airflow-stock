@@ -98,11 +98,12 @@
       <!-- Controls & Filter Toolbar -->
       <div class="screener-controls-card card mb-3">
         <div class="controls-row">
-          <!-- Search input -->
-          <div class="search-box">
+          <!-- Search input with Autocomplete Suggestions Dropdown -->
+          <div class="search-box" id="search-box-wrap">
             <span class="search-icon">🔍</span>
-            <input type="text" id="screener-search-input" placeholder="Tìm kiếm theo mã (AAPL, NVDA...) hoặc tên doanh nghiệp..." />
+            <input type="text" id="screener-search-input" placeholder="Nhập mã (TSLA, AAPL, T...) hoặc tên công ty..." autocomplete="off" />
             <button class="search-clear-btn" id="search-clear-btn" title="Xóa tìm kiếm">&times;</button>
+            <div class="search-suggestions-dropdown hidden" id="search-suggestions-dropdown"></div>
           </div>
 
           <!-- Quick Signal Filter Chips -->
@@ -596,6 +597,22 @@
   <div class="lightbox-modal" id="lightbox-modal">
     <button class="lightbox-close" id="lightbox-close">&times;</button>
     <img src="" alt="Phóng to biểu đồ" class="lightbox-img" id="lightbox-img" />
+  </div>
+
+  <!-- Modal Kích Hoạt Dự Báo AI Theo Yêu Cầu (On-Demand Modal) -->
+  <div class="modal-overlay hidden" id="on-demand-modal">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <div class="modal-title-wrap">
+          <span class="modal-icon">🚀</span>
+          <h3>Kích Hoạt Dự Báo AI Theo Yêu Cầu</h3>
+        </div>
+        <button class="modal-close-btn" id="close-ondemand-modal">&times;</button>
+      </div>
+      <div class="modal-body" id="ondemand-modal-body">
+        <!-- Injected via JavaScript -->
+      </div>
+    </div>
   </div>
 
   <script src="app.js?v=6.0"></script>
