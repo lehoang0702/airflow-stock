@@ -18,16 +18,7 @@ from config_shared import (
     TICKERS_META,
     MACRO_TICKERS,
     FUNDAMENTAL_FIELDS,
-    INTRADAY_INTERVAL
 )
-
-try:
-    import numpy as np
-    import pandas as pd
-    from dag_crawl_intraday_features import calculate_intraday_indicators
-    HAS_PANDAS = True
-except ImportError:
-    HAS_PANDAS = False
 
 
 class TestConfigIntegrity(unittest.TestCase):
@@ -60,46 +51,6 @@ class TestConfigIntegrity(unittest.TestCase):
         expected_fields = ['trailingPE', 'priceToBook', 'returnOnEquity', 'profitMargins', 'debtToEquity', 'beta']
         for f in expected_fields:
             self.assertIn(f, FUNDAMENTAL_FIELDS)
-
-    def test_intraday_config(self):
-        """Xác nhận cấu hình nến Intraday là 1h."""
-        self.assertEqual(INTRADAY_INTERVAL, '1h')
-
-
-class TestIntradayFeatureEngineering(unittest.TestCase):
-    """Kiểm thử hàm tính toán đặc trưng nến 1 giờ khi môi trường có pandas/numpy."""
-
-    def setUp(self):
-        if not HAS_PANDAS:
-            self.skipTest("Bỏ qua test này do môi trường host chưa cài numpy/pandas (chạy đầy đủ trên CI Docker).")
-        dates = pd.date_range(start='2024-01-01 09:30', periods=100, freq='h')
-        np.random.seed(42)
-        close_prices = 150.0 + np.cumsum(np.random.randn(100) * 0.5)
-        high_prices = close_prices + np.random.uniform(0.1, 1.0, 100)
-        low_prices = close_prices - np.random.uniform(0.1, 1.0, 100)
-        open_prices = close_prices + np.random.uniform(-0.3, 0.3, 100)
-        volumes = np.random.randint(100000, 500000, 100)
-
-        self.sample_df = pd.DataFrame({
-            'datetime': dates,
-            'open': open_prices,
-            'high': high_prices,
-            'low': low_prices,
-            'close': close_prices,
-            'volume': volumes
-        })
-
-    def test_intraday_indicators_calculation(self):
-        """Xác nhận hàm tính đúng và đủ các chỉ báo nến giờ (RSI, EMA, VWAP, Volatility)."""
-        res_df = calculate_intraday_indicators(self.sample_df, symbol='AAPL', sector='Technology')
-        self.assertFalse(res_df.empty)
-        required_cols = [
-            'ret_1h', 'ret_4h', 'ema_cross_9_21', 'dist_ema_50',
-            'rsi_14h', 'bb_width_1h', 'volatility_10h',
-            'vwap_proxy', 'dist_from_vwap', 'target_dir_4h'
-        ]
-        for col in required_cols:
-            self.assertIn(col, res_df.columns)
 
 
 if __name__ == '__main__':

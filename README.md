@@ -139,7 +139,7 @@ airflow-stock/
 ├── docker-compose.yaml               # Docker Compose configuration (5 microservices)
 ├── requirements.txt                  # Python dependencies manifest
 ├── README.md                         # Project documentation
-├── dags/                             # 18 DAG Modules & Shared Utilities
+├── dags/                             # 17 DAG Modules & Shared Utilities
 │   ├── config_shared.py              # Centralized configuration: SECTOR_MAP, TICKERS_META, MACRO, CRON
 │   ├── alert_utils.py                # Telegram alerts, on-failure callbacks & safe retry logic
 │   ├── chart_utils.py                # Technical candlestick & indicator charting generation
@@ -151,7 +151,6 @@ airflow-stock/
 │   ├── dag_crawl_xgboost_stock_features.py   # Ingestion for 115+ technical, macro & fundamental features
 │   ├── dag_crawl_lstm_stock_features.py      # Ingestion for 15-year OHLCV time-series for PyTorch
 │   ├── dag_crawl_finbert_news.py             # Ingestion for multi-source financial RSS news & summaries
-│   ├── dag_crawl_intraday_features.py        # ⏱️ Ingestion for 1-hour intraday candles (>50k rows, Parquet)
 │   ├── dag_xgboost_train_and_predict.py      # XGBoost model training, tuning & probability inference
 │   ├── dag_lstm_train_and_predict.py         # PyTorch LSTM deep learning training & sequence inference
 │   ├── dag_finbert_predict.py                # FinBERT sentiment analysis & NLP signal scoring
@@ -171,7 +170,6 @@ airflow-stock/
 ## 🗄️ MinIO S3 Storage Structure (`stock-xgboost-data`)
 
 - `raw-data/`: Raw historical market quotes and daily ingested RSS news articles.
-- `intraday/`: High-resolution 1-hour intraday candles dataset (`.parquet` & `.csv`, >50,000 records).
 - `xgboost/`: 115+ engineered technical, intermarket, and fundamental valuation features (`.parquet` & `.csv`).
 - `lstm/`: 15-year normalized sequence tensors and PyTorch LSTM trend predictions (`.parquet` & `.csv`).
 - `finbert/`: ProsusAI FinBERT sentiment polarity scores and categorized financial summaries (`.parquet` & `.csv`).

@@ -136,13 +136,6 @@ graph TD
         reset_dag_run=False,
     )
 
-    phase1_crawl_intraday = TriggerDagRunOperator(
-        task_id='phase1_crawl_intraday',
-        trigger_dag_id='dag_crawl_intraday_features',
-        wait_for_completion=False,
-        reset_dag_run=False,
-    )
-
     # --- PHASE 2: HUẤN LUYỆN & DỰ BÁO SONG SONG ---
     phase2_train_xgboost = TriggerDagRunOperator(
         task_id='phase2_train_xgboost',
@@ -187,7 +180,7 @@ graph TD
     )
 
     # --- ĐỊNH NGHĨA LUỒNG THỰC THI CHUẨN XÁC ---
-    notify_start >> [phase1_crawl_xgboost, phase1_crawl_lstm, phase1_crawl_finbert, phase1_crawl_intraday]
+    notify_start >> [phase1_crawl_xgboost, phase1_crawl_lstm, phase1_crawl_finbert]
 
     # Đảm bảo Phase 1 (đặc biệt là LSTM chứa dữ liệu giá Close thực 20 mã) hoàn tất trước Phase 2
     [phase1_crawl_xgboost, phase1_crawl_lstm] >> phase2_train_xgboost

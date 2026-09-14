@@ -97,13 +97,9 @@ FUNDAMENTAL_FIELDS = [
     'marketCap',            # Vốn hóa thị trường
 ]
 
-# 6. Cấu hình khung thời gian nến Intraday (Độ mịn cao)
-INTRADAY_INTERVAL = '1h'    # Nến 1 giờ
-INTRADAY_PERIOD = '730d'    # 730 ngày gần nhất (tối đa Yahoo Finance hỗ trợ cho nến 1h)
-
-# 7. Cấu hình lịch sử dữ liệu chuẩn cho Machine Learning
+# 6. Cấu hình lịch sử dữ liệu chuẩn cho Machine Learning
 DATASET_HISTORY_PERIOD = '15y'  # Lịch sử 15 năm (2011 đến nay)
 
-# 8. Lịch chạy tự động tối ưu cho thị trường chứng khoán Mỹ
+# 7. Lịch chạy tự động tối ưu cho thị trường chứng khoán Mỹ
 # 22:00 UTC (05:00 sáng VN) từ Thứ Hai đến Thứ Sáu (sau khi phiên NYSE/NASDAQ đóng cửa)
 DEFAULT_CRON_SCHEDULE = '0 22 * * 1-5'
