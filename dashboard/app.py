@@ -724,50 +724,136 @@ def get_evaluation_data():
     return default_eval
 
 
+def generate_live_chart_image(ticker: str, model: str = "ensemble"):
+    """Tạo ảnh biểu đồ kỹ thuật chuẩn dark-theme khi MinIO chưa có ảnh."""
+    try:
+        import matplotlib
+        matplotlib.use('Agg')
+        import matplotlib.pyplot as plt
+
+        meta = TICKERS_META.get(ticker) or EXTENDED_TICKERS_META.get(ticker) or {'name': ticker, 'sector': 'Thị trường Mỹ'}
+        name = meta.get('name', ticker)
+
+        # 1. Lấy candles từ cache tickers hoặc gọi get_ticker_chart
+        candles = []
+        cached_ticker = _CACHE['tickers'].get(ticker)
+        if cached_ticker and cached_ticker.get('data', {}).get('candles'):
+            candles = cached_ticker['data']['candles']
+        else:
+            t_chart = get_ticker_chart(ticker)
+            if t_chart and t_chart.get('candles'):
+                candles = t_chart['candles']
+
+        fig, (ax1, ax2) = plt.subplots(
+            2, 1, figsize=(11, 6.5), dpi=100,
+            gridspec_kw={'height_ratios': [3, 1]},
+            facecolor='#0B1120'
+        )
+        ax1.set_facecolor('#0F172A')
+        ax2.set_facecolor('#0F172A')
+
+        model_label_map = {
+            'ensemble': 'Báo Cáo Tổng Hợp (Master Ensemble)',
+            'xgboost': 'Mô Hình XGBoost (115+ Đặc Trưng Định Lượng)',
+            'lstm': 'Mô Hình Chuỗi Thời Gian LSTM (Deep Learning)',
+            'finbert': 'Mô Hình Cảm Xúc Tin Tức FinBERT NLP'
+        }
+        model_title = model_label_map.get(model.lower(), 'Báo Cáo Kỹ Thuật Live')
+
+        if candles:
+            df = pd.DataFrame(candles)
+            df['date'] = pd.to_datetime(df['date'])
+            df['MA20'] = df['close'].rolling(15, min_periods=1).mean()
+            last_price = float(df['close'].iloc[-1])
+            prev_price = float(df['close'].iloc[-2]) if len(df) > 1 else last_price
+            change_pct = ((last_price - prev_price) / prev_price) * 100
+
+            # Vẽ đường giá & MA20
+            ax1.plot(df['date'], df['close'], color='#6366F1', linewidth=2.2, label=f'Giá Đóng Cửa (${last_price:.2f})')
+            ax1.plot(df['date'], df['MA20'], color='#F59E0B', linewidth=1.5, linestyle='--', label='Đường MA20')
+
+            title_str = f"{ticker} — {name} | {model_title}\nGiá: ${last_price:.2f} ({change_pct:+.2f}%) | Dữ Liệu Thời Gian Thực"
+            ax1.set_title(title_str, color='#FFFFFF', fontsize=12, fontweight='bold', pad=10)
+            ax1.tick_params(colors='#94A3B8', labelsize=9)
+            ax1.grid(True, color='#1E293B', linestyle=':', alpha=0.8)
+            ax1.legend(loc='upper left', facecolor='#0B1120', edgecolor='#334155', labelcolor='#E2E8F0', fontsize=10)
+
+            # Vẽ Khối lượng giao dịch
+            colors_vol = ['#10B981' if c >= o else '#EF4444' for o, c in zip(df['open'], df['close'])]
+            ax2.bar(df['date'], df['volume'], color=colors_vol, alpha=0.7, width=0.8)
+            ax2.set_ylabel('Khối Lượng', color='#94A3B8', fontsize=9)
+            ax2.tick_params(colors='#94A3B8', labelsize=8)
+            ax2.grid(True, color='#1E293B', linestyle=':', alpha=0.6)
+        else:
+            # Fallback nếu chưa có candle nào
+            ax1.text(0.5, 0.5, f"Đang kết nối dữ liệu kỹ thuật cho {ticker}...\nVui lòng chuyển sang tab Biểu Đồ Nến Tương Tác", 
+                     color='#94A3B8', ha='center', va='center', fontsize=14)
+            ax1.set_title(f"{ticker} — {name} | {model_title}", color='#FFFFFF', fontsize=13, fontweight='bold', pad=12)
+            ax2.text(0.5, 0.5, "Chờ cập nhật khối lượng", color='#64748B', ha='center', va='center', fontsize=11)
+
+        plt.tight_layout()
+        buf = io.BytesIO()
+        plt.savefig(buf, format='png', facecolor=fig.get_facecolor(), edgecolor='none', bbox_inches='tight')
+        plt.close(fig)
+        return buf.getvalue()
+    except Exception as e:
+        logging.warning(f"Error generating live chart image for {ticker}: {e}")
+        return None
+
+
+_CHART_CACHE = {}
+
 def get_chart_image(ticker: str, model: str = "ensemble"):
     """
     Đọc ảnh PNG biểu đồ báo cáo khung kép từ MinIO.
-    Có cơ chế lọc bỏ ảnh rỗng (< 50KB) và tự động fallback sang ảnh chuẩn.
+    Có cơ chế lọc bỏ ảnh rỗng (< 50KB) và tự động fallback sang ảnh chuẩn hoặc ảnh live matplotlib.
     """
+    cache_key = f"{ticker}_{model}"
+    now_ts = time.time()
+    cached = _CHART_CACHE.get(cache_key)
+    if cached and (now_ts - cached['time']) < 60:
+        return cached['data']
+
     s3 = get_s3_client()
-    if not s3:
-        return None
     model = model.lower()
     if model not in ('ensemble', 'xgboost', 'lstm', 'finbert'):
         model = 'ensemble'
 
-    def _find_valid_image(m_name):
-        try:
-            prefix = f"{m_name}/charts_"
-            res = s3.list_objects_v2(Bucket=BUCKET_NAME, Prefix=prefix)
-            contents = res.get('Contents', [])
-            matching = [c for c in contents if c['Key'].endswith(f"/{ticker}.png")]
-            if not matching:
+    img_data = None
+    if s3:
+        def _find_valid_image(m_name):
+            try:
+                prefix = f"{m_name}/charts_"
+                res = s3.list_objects_v2(Bucket=BUCKET_NAME, Prefix=prefix)
+                contents = res.get('Contents', [])
+                matching = [c for c in contents if c['Key'].endswith(f"/{ticker}.png")]
+                if not matching:
+                    return None
+                valid_matching = [c for c in matching if c.get('Size', 0) > 50000]
+                candidates = valid_matching if valid_matching else matching
+                latest = max(candidates, key=lambda x: x['LastModified'])
+                obj = s3.get_object(Bucket=BUCKET_NAME, Key=latest['Key'])
+                data = obj['Body'].read()
+                return data if len(data) > 50000 or not valid_matching else None
+            except Exception as err:
+                logging.warning(f"Error reading chart {ticker} ({m_name}): {err}")
                 return None
-            # Ưu tiên các file có dung lượng chuẩn (> 50KB) để tránh ảnh rỗng "Khong co du lieu"
-            valid_matching = [c for c in matching if c.get('Size', 0) > 50000]
-            candidates = valid_matching if valid_matching else matching
-            latest = max(candidates, key=lambda x: x['LastModified'])
-            obj = s3.get_object(Bucket=BUCKET_NAME, Key=latest['Key'])
-            data = obj['Body'].read()
-            return data if len(data) > 50000 or not valid_matching else None
-        except Exception as err:
-            logging.warning(f"Error reading chart {ticker} ({m_name}): {err}")
-            return None
 
-    # 1. Thử lấy ảnh model được yêu cầu
-    img_data = _find_valid_image(model)
-    if img_data and len(img_data) > 50000:
-        return img_data
+        # 1. Thử lấy ảnh model được yêu cầu
+        img_data = _find_valid_image(model)
 
-    # 2. Fallback sang ensemble nếu model yêu cầu bị rỗng/lỗi
-    if model != 'ensemble':
-        logging.info(f"🔄 Fallback chart {ticker} từ {model} sang ensemble...")
-        ens_data = _find_valid_image('ensemble')
-        if ens_data and len(ens_data) > 50000:
-            return ens_data
+        # 2. Fallback sang ensemble nếu model yêu cầu bị rỗng
+        if (not img_data or len(img_data) < 50000) and model != 'ensemble':
+            logging.info(f"🔄 Fallback chart {ticker} từ {model} sang ensemble...")
+            img_data = _find_valid_image('ensemble')
 
-    # 3. Trả về kết quả nếu không còn lựa chọn nào tốt hơn
+    # 3. Fallback sang ảnh live matplotlib nếu không có trong MinIO (cho các mã ngoài 20 core)
+    if not img_data or len(img_data) < 50000:
+        img_data = generate_live_chart_image(ticker, model)
+
+    if img_data:
+        _CHART_CACHE[cache_key] = {'time': now_ts, 'data': img_data}
+
     return img_data
 
 

@@ -2806,6 +2806,68 @@ body {
 .legend-line.dashed-green { border-top: 2px dashed #10B981; }
 .legend-line.dashed-red { border-top: 2px dashed #F43F5E; }
 
+/* Report Image Empty / Fallback Card */
+.report-img-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 380px;
+  background: rgba(15, 23, 42, 0.85);
+  border-radius: var(--radius-md);
+  border: 1px dashed rgba(99, 102, 241, 0.4);
+  padding: 36px 24px;
+  text-align: center;
+}
+
+.report-img-empty.hidden {
+  display: none !important;
+}
+
+.empty-chart-box {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  max-width: 520px;
+}
+
+.empty-chart-icon {
+  font-size: 40px;
+}
+
+.empty-chart-box h3 {
+  font-size: 18px;
+  font-weight: 700;
+  color: #FFFFFF;
+  margin: 0;
+}
+
+.empty-chart-box p {
+  font-size: 13px;
+  color: #94A3B8;
+  line-height: 1.6;
+  margin: 0;
+}
+
+.btn-switch-to-candlestick {
+  background: linear-gradient(135deg, #6366F1, #8B5CF6);
+  color: #FFFFFF;
+  border: none;
+  padding: 10px 22px;
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: 0 4px 15px rgba(99, 102, 241, 0.4);
+  transition: all var(--transition-fast);
+  margin-top: 6px;
+}
+
+.btn-switch-to-candlestick:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 20px rgba(99, 102, 241, 0.6);
+}
+
 
 
 

@@ -127,7 +127,11 @@ function selectTicker(ticker, shouldSwitchTab = false) {
   // Tải dữ liệu biểu đồ cho mã mới
   loadTickerChart(ticker);
 
-  if (state.activeView !== 'candlestick') {
+  const isOutside = SEARCH_DIRECTORY.some(i => i.ticker === ticker && !i.isCore);
+  if (isOutside) {
+    // Với mã mở rộng, ưu tiên chế độ Nến Nhật Tương Tác & MA20
+    switchViewMode('candlestick');
+  } else if (state.activeView !== 'candlestick') {
     updateReportImage();
   }
 
@@ -144,49 +148,74 @@ function selectTicker(ticker, shouldSwitchTab = false) {
 }
 
 // 3. Toolbar chuyển chế độ xem biểu đồ (Nến tương tác vs Ảnh báo cáo)
+function switchViewMode(view) {
+  state.activeView = view;
+
+  const buttons = document.querySelectorAll('#view-buttons .view-btn');
+  buttons.forEach(b => {
+    if (b.dataset.view === view) b.classList.add('active');
+    else b.classList.remove('active');
+  });
+
+  const imgContainer = document.getElementById('report-img-container');
+  const candleSection = document.getElementById('candlestick-section');
+  const actionsBlock = document.getElementById('view-actions-block');
+
+  if (view === 'candlestick') {
+    if (imgContainer) imgContainer.classList.add('hidden');
+    if (candleSection) candleSection.classList.remove('hidden');
+    if (actionsBlock) actionsBlock.classList.add('hidden');
+    if (state.chartData[state.activeTicker]) {
+      renderCandlestickSVG(state.chartData[state.activeTicker].candles || []);
+    }
+  } else {
+    if (imgContainer) imgContainer.classList.remove('hidden');
+    if (candleSection) candleSection.classList.add('hidden');
+    if (actionsBlock) actionsBlock.classList.remove('hidden');
+    updateReportImage();
+  }
+}
+window.switchToCandlestickView = () => switchViewMode('candlestick');
+
 function initViewButtons() {
   const buttons = document.querySelectorAll('#view-buttons .view-btn');
   buttons.forEach(btn => {
     btn.addEventListener('click', () => {
       const view = btn.dataset.view;
-      state.activeView = view;
-
-      buttons.forEach(b => b.classList.remove('active'));
-      btn.classList.add('active');
-
-      const imgContainer = document.getElementById('report-img-container');
-      const candleSection = document.getElementById('candlestick-section');
-      const actionsBlock = document.getElementById('view-actions-block');
-
-      if (view === 'candlestick') {
-        if (imgContainer) imgContainer.classList.add('hidden');
-        if (candleSection) candleSection.classList.remove('hidden');
-        if (actionsBlock) actionsBlock.classList.add('hidden');
-        if (state.chartData[state.activeTicker]) {
-          renderCandlestickSVG(state.chartData[state.activeTicker].candles || []);
-        }
-      } else {
-        if (imgContainer) imgContainer.classList.remove('hidden');
-        if (candleSection) candleSection.classList.add('hidden');
-        if (actionsBlock) actionsBlock.classList.remove('hidden');
-        updateReportImage();
-      }
+      switchViewMode(view);
     });
   });
 }
 
 function updateReportImage() {
   const img = document.getElementById('report-chart-img');
+  const emptyBox = document.getElementById('report-img-empty');
   const downloadBtn = document.getElementById('btn-download-img');
   if (!img) return;
 
   const model = state.activeView === 'candlestick' ? 'ensemble' : state.activeView;
   const imgUrl = `/api/chart-image?symbol=${state.activeTicker}&model=${model}&t=${Date.now()}`;
 
+  img.style.display = 'block';
   img.style.opacity = '0.5';
+  if (emptyBox) emptyBox.classList.add('hidden');
+
   img.src = imgUrl;
-  img.onload = () => { img.style.opacity = '1'; };
-  img.onerror = () => { img.style.opacity = '1'; };
+  img.onload = () => {
+    img.style.opacity = '1';
+    img.style.display = 'block';
+    if (emptyBox) emptyBox.classList.add('hidden');
+  };
+  img.onerror = () => {
+    img.style.display = 'none';
+    if (emptyBox) {
+      emptyBox.classList.remove('hidden');
+      const titleEl = document.getElementById('empty-img-title');
+      const descEl = document.getElementById('empty-img-desc');
+      if (titleEl) titleEl.textContent = `Chưa có ảnh báo cáo AI cho ${state.activeTicker}`;
+      if (descEl) descEl.innerHTML = `Hệ thống chưa tạo ảnh báo cáo cho <strong>${state.activeTicker}</strong>. Vui lòng bấm nút bên dưới để chuyển sang <strong>Biểu Đồ Nến Nhật & RSI Tương Tác</strong>.`;
+    }
+  };
 
   if (downloadBtn) {
     downloadBtn.href = `/api/chart-image?symbol=${state.activeTicker}&model=${model}`;

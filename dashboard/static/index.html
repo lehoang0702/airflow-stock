@@ -252,7 +252,21 @@
 
           <!-- Report Image View (Secondary View - Hidden by default) -->
           <div class="report-img-container hidden" id="report-img-container">
-            <img id="report-chart-img" src="/api/chart-image?symbol=AAPL&model=ensemble" alt="Báo cáo phân tích Telegram" class="report-chart-img" />
+            <img id="report-chart-img" src="/api/chart-image?symbol=AAPL&model=ensemble" alt="Báo cáo phân tích kỹ thuật" class="report-chart-img" />
+            <div class="report-img-empty hidden" id="report-img-empty">
+              <div class="empty-chart-box">
+                <div class="empty-chart-icon">📊</div>
+                <h3 id="empty-img-title">Chưa Có Ảnh Báo Cáo AI Cho Mã Này</h3>
+                <p id="empty-img-desc">
+                  Mã này là cổ phiếu tra cứu mở rộng thời gian thực. Các báo cáo định lượng chuyên sâu hiện được tạo tự động hàng ngày cho danh mục <strong>20 Cổ Phiếu Cốt Lõi</strong>.
+                </p>
+                <div class="empty-chart-actions">
+                  <button class="btn-switch-to-candlestick" onclick="switchToCandlestickView()">
+                    🕯️ Xem Biểu Đồ Nến Nhật & RSI Tương Tác →
+                  </button>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
 
