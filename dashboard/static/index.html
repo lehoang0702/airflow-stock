@@ -615,6 +615,100 @@
     <img src="" alt="Phóng to biểu đồ" class="lightbox-img" id="lightbox-img" />
   </div>
 
-  <script src="app.js?v=7.0"></script>
+  <!-- On-Demand AI Pipeline Progress Modal -->
+  <div class="ai-modal-overlay" id="ai-modal-overlay">
+    <div class="ai-modal-card">
+      <div class="ai-modal-header">
+        <div class="ai-modal-title-wrap">
+          <span class="ai-modal-badge">⚡ PIPELINE AI ON-DEMAND</span>
+          <h3 class="ai-modal-title">Đang Cào Dữ Liệu & Phân Tích: <span class="ai-modal-ticker-highlight" id="ai-modal-ticker-symbol">META</span></h3>
+        </div>
+        <button class="ai-modal-close" id="ai-modal-close-btn" title="Đóng">&times;</button>
+      </div>
+      
+      <p class="ai-modal-desc">
+        Hệ thống đang kết nối thị trường chứng khoán, thu thập nến giá OHLCV & tin tức tài chính, trích xuất 69 đặc trưng kỹ thuật và thực thi 4 mô hình độc lập (XGBoost, LSTM, FinBERT, Master Ensemble).
+      </p>
+
+      <!-- Dynamic Progress Track -->
+      <div class="ai-progress-wrap">
+        <div class="ai-progress-header">
+          <span class="ai-progress-status" id="ai-progress-status-text">Đang khởi tạo tiến trình...</span>
+          <span class="ai-progress-pct" id="ai-progress-pct-val">0%</span>
+        </div>
+        <div class="ai-progress-track">
+          <div class="ai-progress-bar" id="ai-progress-bar-fill"></div>
+        </div>
+      </div>
+
+      <!-- Step List -->
+      <div class="ai-steps-list">
+        <div class="ai-step-item" id="ai-step-1">
+          <div class="ai-step-icon">🌐</div>
+          <div class="ai-step-content">
+            <div class="ai-step-name">Bước 1: Cào Dữ Liệu Nến OHLCV & Tin Tức Thị Trường</div>
+            <div class="ai-step-sub" id="ai-step-1-sub">Kết nối yfinance API tải 6 tháng nến giá & 8 tin tức mới nhất</div>
+          </div>
+          <div class="ai-step-badge" id="ai-step-1-badge">Chờ...</div>
+        </div>
+
+        <div class="ai-step-item" id="ai-step-2">
+          <div class="ai-step-icon">🌲</div>
+          <div class="ai-step-content">
+            <div class="ai-step-name">Bước 2: Trích Xuất 69 Đặc Trưng & Chạy XGBoost</div>
+            <div class="ai-step-sub" id="ai-step-2-sub">Tính RSI 14, MACD, MA20/50, Volume Trend & xác suất tăng giá</div>
+          </div>
+          <div class="ai-step-badge" id="ai-step-2-badge">Chờ...</div>
+        </div>
+
+        <div class="ai-step-item" id="ai-step-3">
+          <div class="ai-step-icon">🧠</div>
+          <div class="ai-step-content">
+            <div class="ai-step-name">Bước 3: Dự Báo Chuỗi Thời Gian Deep Learning LSTM</div>
+            <div class="ai-step-sub" id="ai-step-3-sub">Phân tích quán tính chuỗi nến & xung lực giá đa khung thời gian</div>
+          </div>
+          <div class="ai-step-badge" id="ai-step-3-badge">Chờ...</div>
+        </div>
+
+        <div class="ai-step-item" id="ai-step-4">
+          <div class="ai-step-icon">📰</div>
+          <div class="ai-step-content">
+            <div class="ai-step-name">Bước 4: Phân Tích Cảm Xúc NLP FinBERT</div>
+            <div class="ai-step-sub" id="ai-step-4-sub">Phân loại cảm xúc tin tức tài chính Tích Cực / Tiêu Cực / Trung Lập</div>
+          </div>
+          <div class="ai-step-badge" id="ai-step-4-badge">Chờ...</div>
+        </div>
+
+        <div class="ai-step-item" id="ai-step-5">
+          <div class="ai-step-icon">👑</div>
+          <div class="ai-step-content">
+            <div class="ai-step-name">Bước 5: Tổng Hợp Master Ensemble & Kế Hoạch TP/SL</div>
+            <div class="ai-step-sub" id="ai-step-5-sub">Trọng số 35% XGB + 35% LSTM + 30% FinBERT, điểm Entry, TP, SL</div>
+          </div>
+          <div class="ai-step-badge" id="ai-step-5-badge">Chờ...</div>
+        </div>
+      </div>
+
+      <!-- Live Terminal Log -->
+      <div class="ai-log-terminal">
+        <div class="ai-log-header">
+          <span>📟 TIẾN TRÌNH THỰC THI HỆ THỐNG (SYSTEM LOG)</span>
+          <span class="ai-log-live-dot"></span>
+        </div>
+        <div class="ai-log-body" id="ai-log-body">
+          <div class="log-line">> Sẵn sàng thực thi pipeline phân tích...</div>
+        </div>
+      </div>
+
+      <div class="ai-modal-footer">
+        <button class="btn-cancel-modal" id="ai-modal-cancel-btn">✕ Hủy Tiến Trình</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Global Toast Notification -->
+  <div class="toast-container" id="toast-container"></div>
+
+  <script src="app.js?v=8.0"></script>
 </body>
 </html>

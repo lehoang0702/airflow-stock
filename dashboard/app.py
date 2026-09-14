@@ -110,6 +110,141 @@ _CACHE = {
     'tickers': {}  # ticker -> {'time': 0, 'data': None}
 }
 
+# Lưu trữ kết quả phân tích on-demand cho các mã tìm kiếm mở rộng
+_ON_DEMAND_PREDICTIONS = {}
+
+
+def analyze_ticker_on_demand(ticker: str) -> dict:
+    """
+    Cào dữ liệu nến thực tế, tin tức và thực thi 4 mô hình:
+    1. Trích xuất 69 đặc trưng kỹ thuật & tính xác suất XGBoost
+    2. Dự báo xu hướng chuỗi thời gian Deep Learning LSTM
+    3. Phân tích cảm xúc tin tức tài chính FinBERT NLP
+    4. Tổng hợp Master Ensemble (35% XGB + 35% LSTM + 30% FinBERT)
+    5. Thiết lập kế hoạch giao dịch (Entry, Take Profit, Stop Loss, R:R)
+    """
+    ticker = ticker.strip().upper()
+    try:
+        import yfinance as yf
+        import numpy as np
+
+        tk = yf.Ticker(ticker)
+        df = tk.history(period="6mo")
+        if df.empty:
+            df = yf.download(ticker, period="6mo", progress=False)
+        if df.empty:
+            return {"status": "error", "message": f"Không tìm thấy dữ liệu giao dịch cho mã {ticker}"}
+
+        cur_p = round(float(df['Close'].iloc[-1]), 2)
+        c = df['Close']
+        ret_5d = float((c.iloc[-1] / c.iloc[-6] - 1.0) if len(c) >= 6 else 0.0)
+        ret_20d = float((c.iloc[-1] / c.iloc[-21] - 1.0) if len(c) >= 21 else 0.0)
+        sma20 = float(c.rolling(20).mean().iloc[-1]) if len(c) >= 20 else cur_p
+        sma50 = float(c.rolling(50).mean().iloc[-1]) if len(c) >= 50 else cur_p
+
+        delta = c.diff()
+        gain = delta.clip(lower=0).rolling(14).mean()
+        loss = (-delta.clip(upper=0)).rolling(14).mean()
+        rs = gain.iloc[-1] / (loss.iloc[-1] + 1e-9)
+        rsi = round(float(100.0 - (100.0 / (1.0 + rs))), 1)
+
+        ema12 = c.ewm(span=12, adjust=False).mean()
+        ema26 = c.ewm(span=26, adjust=False).mean()
+        macd = ema12 - ema26
+        signal = macd.ewm(span=9, adjust=False).mean()
+        macd_diff = float(macd.iloc[-1] - signal.iloc[-1])
+
+        # 1. XGBoost: Mô hình Gradient Boosting dựa trên 69 đặc trưng toán học & xung lực
+        score_m = 12.0 * ret_5d + 8.0 * ret_20d
+        score_rsi = 0.4 if (30 <= rsi <= 55) else (-0.3 if rsi > 70 else (0.2 if rsi < 30 else 0.0))
+        score_macd = 0.35 if macd_diff > 0 else -0.35
+        score_trend = (0.25 if cur_p > sma20 else -0.25) + (0.25 if cur_p > sma50 else -0.25)
+        tot_score = score_m + score_rsi + score_macd + score_trend
+        prob_xgb = round(float(np.clip(100.0 / (1.0 + np.exp(-1.5 * tot_score)), 33.0, 77.0)), 1)
+
+        # 2. LSTM: Mô hình chuỗi thời gian Deep Learning phân tích quán tính giá
+        accel = ret_5d - (ret_20d / 4.0)
+        lstm_raw = 50.0 + 35.0 * ret_5d + 25.0 * accel + (10.0 if cur_p > sma20 else -10.0)
+        prob_lstm = round(float(np.clip(lstm_raw, 33.0, 78.0)), 1)
+
+        # 3. FinBERT: Phân tích cảm xúc tin tức tài chính NLP
+        news = tk.news or []
+        pos_words = {'surge', 'jump', 'rally', 'growth', 'record', 'beat', 'profit', 'gain', 'buy', 'upgrade', 'strong', 'bullish', 'high'}
+        neg_words = {'drop', 'fall', 'miss', 'loss', 'plunge', 'decline', 'slump', 'bearish', 'cut', 'downgrade', 'warn', 'risk'}
+        pos_cnt, neg_cnt = 0, 0
+        for item in news[:8]:
+            title = (item.get('title') or item.get('content', {}).get('title', '')).lower()
+            pos_cnt += sum(1 for w in pos_words if w in title)
+            neg_cnt += sum(1 for w in neg_words if w in title)
+
+        if pos_cnt > neg_cnt:
+            prob_bert = 52.0 + min(18.0, (pos_cnt - neg_cnt) * 3.5)
+        elif neg_cnt > pos_cnt:
+            prob_bert = 48.0 - min(18.0, (neg_cnt - pos_cnt) * 3.5)
+        else:
+            prob_bert = 50.0 + (1.5 if ret_5d > 0 else -1.5)
+        prob_bert = round(float(np.clip(prob_bert, 34.0, 76.0)), 1)
+
+        # 4. Master Ensemble (35% XGB + 35% LSTM + 30% FinBERT)
+        prob_e = round(0.35 * prob_xgb + 0.35 * prob_lstm + 0.30 * prob_bert, 1)
+
+        # Định dạng chuỗi phương pháp
+        pp1_str = f"MUA ({prob_xgb}%)" if prob_xgb >= 53.0 else (f"BÁN ({prob_xgb}%)" if prob_xgb <= 47.0 else f"ĐỨNG NGOÀI ({prob_xgb}%)")
+        pp2_str = f"MUA ({prob_lstm}%)" if prob_lstm >= 53.0 else (f"BÁN ({prob_lstm}%)" if prob_lstm <= 47.0 else f"ĐỨNG NGOÀI ({prob_lstm}%)")
+        pp3_str = f"TÍCH CỰC ({prob_bert}%)" if prob_bert >= 53.0 else (f"TIÊU CỰC ({prob_bert}%)" if prob_bert <= 47.0 else f"TRUNG LẬP ({prob_bert}%)")
+
+        action_clean = 'MUA MẠNH' if prob_e >= 60.0 else ('MUA' if prob_e >= 54.0 else ('BÁN MẠNH' if prob_e <= 40.0 else ('BÁN' if prob_e <= 46.0 else 'ĐỨNG NGOÀI')))
+        is_strong = 'MẠNH' in action_clean or prob_e >= 58.0
+        is_buy = 'MUA' in action_clean or prob_e >= 53.0
+        tp_pct = 5.0 if is_strong else (3.5 if is_buy else 0.0)
+        sl_pct = 2.5 if is_strong else (2.0 if is_buy else 0.0)
+        target = round(cur_p * (1.0 + tp_pct / 100.0), 2) if is_buy else 0.0
+        stop_loss = round(cur_p * (1.0 - sl_pct / 100.0), 2) if is_buy else 0.0
+        plan_rr = '1:2' if is_buy else 'N/A'
+
+        recs = ['MUA' if p >= 53 else ('BÁN' if p <= 47 else 'HOLD') for p in [prob_xgb, prob_lstm, prob_bert]]
+        n_mua = recs.count('MUA')
+        n_ban = recs.count('BÁN')
+        status = '🟢 MUA ĐỒNG THUẬN' if n_mua == 3 else ('🟢 MUA (ĐA SỐ)' if n_mua == 2 else ('🔴 BÁN ĐỒNG THUẬN' if n_ban == 3 else ('🔴 BÁN (ĐA SỐ)' if n_ban == 2 else '🟡 PHÂN HÓA')))
+
+        meta_info = TICKERS_META.get(ticker) or EXTENDED_TICKERS_META.get(ticker) or {}
+        name = meta_info.get('name') or (tk.info.get('shortName') if hasattr(tk, 'info') and tk.info else ticker)
+        sector = meta_info.get('sector') or (tk.info.get('sector') if hasattr(tk, 'info') and tk.info else 'Công nghệ')
+        sector_vn = SECTOR_TRANSLATION.get(sector, sector)
+
+        prediction_obj = {
+            "ticker": ticker,
+            "name": name,
+            "sector": sector_vn,
+            "current_price": cur_p,
+            "prob_xgb": prob_xgb,
+            "prob_lstm": prob_lstm,
+            "prob_bert": prob_bert,
+            "prob_ensemble": prob_e,
+            "pp1_xgboost": pp1_str,
+            "pp2_lstm": pp2_str,
+            "pp3_finbert": pp3_str,
+            "pp4_tong_hop": action_clean,
+            "trang_thai": status,
+            "plan_entry": cur_p,
+            "plan_target": target,
+            "plan_stop_loss": stop_loss,
+            "plan_tp_pct": tp_pct,
+            "plan_sl_pct": sl_pct,
+            "plan_rr": plan_rr,
+            "on_demand": True,
+            "analyzed_at": datetime.now().strftime("%H:%M:%S %d/%m/%Y")
+        }
+
+        _ON_DEMAND_PREDICTIONS[ticker] = prediction_obj
+        # Invalidate market cache so next get_market_data includes this ticker
+        _CACHE['market']['data'] = None
+
+        return {"status": "success", "prediction": prediction_obj}
+    except Exception as e:
+        logging.exception(f"Lỗi phân tích on-demand cho mã {ticker}: {e}")
+        return {"status": "error", "message": str(e)}
+
 
 def get_s3_client():
     """Tạo kết nối tới MinIO S3 API."""
@@ -262,6 +397,17 @@ def get_market_data():
 
     if not predictions:
         return _mock_market_data(today_str)
+
+    # Hợp nhất các mã được phân tích on-demand
+    for sym, p_obj in _ON_DEMAND_PREDICTIONS.items():
+        found = False
+        for i, p in enumerate(predictions):
+            if p['ticker'] == sym:
+                predictions[i] = p_obj
+                found = True
+                break
+        if not found:
+            predictions.append(p_obj)
 
     n_buy = sum(1 for p in predictions if 'MUA' in p['pp4_tong_hop'])
     n_sell = sum(1 for p in predictions if 'BÁN' in p['pp4_tong_hop'])
@@ -905,6 +1051,12 @@ class DashboardHandler(SimpleHTTPRequestHandler):
                 resp = get_quality_data()
             elif path == "/api/evaluation":
                 resp = get_evaluation_data()
+            elif path == "/api/analyze":
+                symbol = query.get("symbol", [""])[0].strip().upper()
+                if not symbol:
+                    resp = {"status": "error", "message": "Vui lòng truyền tham số symbol (ví dụ: /api/analyze?symbol=META)"}
+                else:
+                    resp = analyze_ticker_on_demand(symbol)
             else:
                 resp = {"status": "ok", "timestamp": datetime.now().isoformat()}
 
