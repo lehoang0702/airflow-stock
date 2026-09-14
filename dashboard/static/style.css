@@ -2431,20 +2431,44 @@ body {
   width: 40px;
 }
 
+.model-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.model-pill .model-pct {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  opacity: 0.85;
+}
+
+.model-pill.bullish {
+  background: rgba(16, 185, 129, 0.15);
+  color: #34D399;
+  border: 1px solid rgba(16, 185, 129, 0.3);
+}
+
+.model-pill.bearish {
+  background: rgba(244, 63, 94, 0.15);
+  color: #FB7185;
+  border: 1px solid rgba(244, 63, 94, 0.3);
+}
+
+.model-pill.neutral {
+  background: rgba(148, 163, 184, 0.12);
+  color: #CBD5E1;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+}
+
 .sub-pct {
   font-size: 11px;
   margin-left: 2px;
-}
-
-.rr-badge {
-  display: inline-block;
-  padding: 2px 6px;
-  background: rgba(99, 102, 241, 0.15);
-  color: #A5B4FC;
-  border: 1px solid rgba(99, 102, 241, 0.3);
-  border-radius: 4px;
-  font-weight: 700;
-  font-size: 11px;
 }
 
 .btn-table-action {

@@ -455,7 +455,7 @@ function applyScreenerFilters() {
   if (filtered.length === 0) {
     tbody.innerHTML = `
       <tr>
-        <td colspan="10" class="table-empty">
+        <td colspan="9" class="table-empty">
           <div class="empty-state-box">
             <span class="empty-state-icon">🔍</span>
             <p>Không tìm thấy mã cổ phiếu nào phù hợp với bộ lọc hiện tại.</p>
@@ -464,6 +464,22 @@ function applyScreenerFilters() {
       </tr>
     `;
     return;
+  }
+
+  function getModelPill(prob, type) {
+    const pVal = Number(prob) || 50;
+    let label = 'Trung tính';
+    let cls = 'neutral';
+    if (type === 'sentiment') {
+      if (pVal >= 55) { label = 'Tích cực'; cls = 'bullish'; }
+      else if (pVal <= 45) { label = 'Tiêu cực'; cls = 'bearish'; }
+      else { label = 'Trung tính'; cls = 'neutral'; }
+    } else {
+      if (pVal >= 52) { label = 'Tăng'; cls = 'bullish'; }
+      else if (pVal <= 48) { label = 'Giảm'; cls = 'bearish'; }
+      else { label = 'Đi ngang'; cls = 'neutral'; }
+    }
+    return `<span class="model-pill ${cls}">${label} <span class="model-pct">${pVal.toFixed(1)}%</span></span>`;
   }
 
   tbody.innerHTML = filtered.map(p => {
@@ -476,16 +492,6 @@ function applyScreenerFilters() {
     if (action.includes('MUA MẠNH')) badgeClass = 'badge-strong-buy';
     else if (isBuy) badgeClass = 'badge-buy';
     else if (isSell) badgeClass = 'badge-sell';
-
-    const tpText = isBuy && p.plan_target > 0 
-      ? `$${p.plan_target.toFixed(2)} <span class="sub-pct text-success">(+${p.plan_tp_pct}%)</span>` 
-      : '<span class="text-muted">N/A</span>';
-
-    const slText = isBuy && p.plan_stop_loss > 0 
-      ? `$${p.plan_stop_loss.toFixed(2)} <span class="sub-pct text-danger">(-${p.plan_sl_pct}%)</span>` 
-      : '<span class="text-muted">N/A</span>';
-
-    const rrText = isBuy ? '<span class="rr-badge">1 : 2</span>' : '<span class="text-muted">N/A</span>';
 
     return `
       <tr class="screener-row ${isSelected ? 'selected' : ''}" data-ticker="${p.ticker}" onclick="selectTicker('${p.ticker}', false)">
@@ -501,6 +507,15 @@ function applyScreenerFilters() {
         <td class="td-price">
           <strong>$${p.current_price.toFixed(2)}</strong>
         </td>
+        <td class="td-xgb">
+          ${getModelPill(p.prob_xgb, 'signal')}
+        </td>
+        <td class="td-lstm">
+          ${getModelPill(p.prob_lstm, 'signal')}
+        </td>
+        <td class="td-bert">
+          ${getModelPill(p.prob_bert, 'sentiment')}
+        </td>
         <td class="td-signal">
           <span class="ai-signal-badge ${badgeClass}">${action}</span>
         </td>
@@ -512,21 +527,9 @@ function applyScreenerFilters() {
             <span class="confidence-num">${p.prob_ensemble}%</span>
           </div>
         </td>
-        <td class="td-entry">
-          ${isBuy ? `<b>$${p.plan_entry.toFixed(2)}</b>` : '<span class="text-muted">--</span>'}
-        </td>
-        <td class="td-tp">
-          ${tpText}
-        </td>
-        <td class="td-sl">
-          ${slText}
-        </td>
-        <td class="td-rr">
-          ${rrText}
-        </td>
         <td class="td-action">
           <button class="btn-table-action" onclick="event.stopPropagation(); selectTicker('${p.ticker}', true)">
-            Biểu Đồ ➔
+            Xem Biểu Đồ ➔
           </button>
         </td>
       </tr>
