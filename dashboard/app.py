@@ -103,8 +103,8 @@ SECTOR_TRANSLATION = {
     'Materials': 'Công nghiệp',
 }
 
-# Cache for heavy datasets (TTL in seconds)
-CACHE_TTL = 60
+# Cache for heavy datasets (TTL in seconds - 5s for fast refresh)
+CACHE_TTL = 5
 _CACHE = {
     'market': {'time': 0, 'data': None},
     'tickers': {}  # ticker -> {'time': 0, 'data': None}
@@ -811,7 +811,7 @@ def get_chart_image(ticker: str, model: str = "ensemble"):
     cache_key = f"{ticker}_{model}"
     now_ts = time.time()
     cached = _CHART_CACHE.get(cache_key)
-    if cached and (now_ts - cached['time']) < 60:
+    if cached and (now_ts - cached['time']) < 5:
         return cached['data']
 
     s3 = get_s3_client()

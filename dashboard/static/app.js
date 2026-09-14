@@ -546,11 +546,11 @@ function initEventListeners() {
   }
 }
 
-// 7. Tự động làm mới chu kỳ 5 phút
+// 7. Tự động làm mới chu kỳ 5 giây
 function initAutoRefresh() {
   setInterval(() => {
     loadAllData();
-  }, 300000); // 5 phút
+  }, 5000); // 5 giây
 }
 
 // ==========================================================================
