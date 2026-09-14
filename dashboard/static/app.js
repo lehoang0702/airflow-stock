@@ -407,8 +407,88 @@ function renderTopPicksBanner(market) {
   }).join('');
 }
 
+const SECTOR_ALIASES = {
+  'tech': ['công nghệ', 'technology', 'tech'],
+  'finance': ['tài chính', 'financials', 'financial services', 'finance', 'ngân hàng'],
+  'health': ['y tế', 'healthcare', 'health', 'chăm sóc sức khỏe'],
+  'consumer': ['tiêu dùng', 'consumer', 'hàng tiêu dùng', 'staples', 'discretionary', 'đồ uống', 'bán lẻ', 'thời trang'],
+  'energy': ['năng lượng', 'energy', 'tiện ích', 'utilities', 'dầu khí'],
+  'industry': ['công nghiệp', 'industrials', 'industry', 'vật liệu', 'materials', 'chế tạo', 'hàng không']
+};
+
+function matchStockSector(p, filterKey) {
+  if (!filterKey || filterKey === 'all') return true;
+  const targetAliases = SECTOR_ALIASES[filterKey] || [filterKey.toLowerCase()];
+  const stockSec = `${p.sector || ''} ${p.sector_en || ''}`.toLowerCase();
+  return targetAliases.some(alias => stockSec.includes(alias));
+}
+
+function updateFilterChipCounts(preds) {
+  if (!preds || !preds.length) return;
+
+  const buyCount = preds.filter(p => (p.pp4_tong_hop || '').includes('MUA') || p.prob_ensemble >= 53).length;
+  const sellCount = preds.filter(p => (p.pp4_tong_hop || '').includes('BÁN') || p.prob_ensemble <= 47).length;
+  const holdCount = preds.length - buyCount - sellCount;
+
+  const chipAll = document.getElementById('filter-chip-all');
+  const chipBuy = document.getElementById('filter-chip-buy');
+  const chipHold = document.getElementById('filter-chip-hold');
+  const chipSell = document.getElementById('filter-chip-sell');
+
+  if (chipAll) chipAll.textContent = `Tất Cả (${preds.length})`;
+  if (chipBuy) chipBuy.textContent = `🟢 Khuyến Nghị MUA (${buyCount})`;
+  if (chipHold) chipHold.textContent = `🟡 Theo Dõi (${holdCount})`;
+  if (chipSell) chipSell.textContent = `🔴 Cảnh Báo BÁN (${sellCount})`;
+
+  const sectorMeta = {
+    'tech': { icon: '💻', name: 'Công Nghệ' },
+    'finance': { icon: '🏦', name: 'Tài Chính' },
+    'health': { icon: '🏥', name: 'Y Tế' },
+    'consumer': { icon: '🛒', name: 'Tiêu Dùng' },
+    'energy': { icon: '⚡', name: 'Năng Lượng' },
+    'industry': { icon: '🏭', name: 'Công Nghiệp' }
+  };
+
+  document.querySelectorAll('#sector-filter-group .sector-chip').forEach(btn => {
+    const sKey = btn.dataset.sector;
+    if (sKey === 'all') {
+      btn.textContent = `Tất Cả Ngành (${preds.length})`;
+    } else {
+      const count = preds.filter(p => matchStockSector(p, sKey)).length;
+      const meta = sectorMeta[sKey] || { icon: '', name: sKey };
+      btn.textContent = `${meta.icon} ${meta.name} (${count})`;
+    }
+  });
+}
+
+function resetScreenerFilters() {
+  state.filterSignal = 'all';
+  state.filterSector = 'all';
+  state.searchKeyword = '';
+
+  const searchInput = document.getElementById('screener-search-input');
+  if (searchInput) searchInput.value = '';
+  const clearBtn = document.getElementById('search-clear-btn');
+  if (clearBtn) clearBtn.style.display = 'none';
+
+  document.querySelectorAll('#signal-filter-group .filter-chip').forEach(b => {
+    if (b.dataset.filter === 'all') b.classList.add('active');
+    else b.classList.remove('active');
+  });
+  document.querySelectorAll('#sector-filter-group .sector-chip').forEach(b => {
+    if (b.dataset.sector === 'all') b.classList.add('active');
+    else b.classList.remove('active');
+  });
+
+  applyScreenerFilters();
+}
+window.resetScreenerFilters = resetScreenerFilters;
+
 // Render toàn bộ dữ liệu bảng Screener
 function renderScreenerTable(market) {
+  if (market && market.predictions) {
+    updateFilterChipCounts(market.predictions);
+  }
   applyScreenerFilters();
 }
 
@@ -422,18 +502,20 @@ function applyScreenerFilters() {
   const filtered = preds.filter(p => {
     // 1. Lọc theo Signal
     if (state.filterSignal === 'buy') {
-      if (!p.pp4_tong_hop.includes('MUA') && p.prob_ensemble < 53) return false;
+      const isBuy = (p.pp4_tong_hop || '').includes('MUA') || p.prob_ensemble >= 53;
+      if (!isBuy) return false;
     } else if (state.filterSignal === 'hold') {
-      if (p.pp4_tong_hop.includes('MUA') || p.pp4_tong_hop.includes('BÁN')) return false;
+      const isBuy = (p.pp4_tong_hop || '').includes('MUA') || p.prob_ensemble >= 53;
+      const isSell = (p.pp4_tong_hop || '').includes('BÁN') || p.prob_ensemble <= 47;
+      if (isBuy || isSell) return false;
     } else if (state.filterSignal === 'sell') {
-      if (!p.pp4_tong_hop.includes('BÁN') && p.prob_ensemble > 47) return false;
+      const isSell = (p.pp4_tong_hop || '').includes('BÁN') || p.prob_ensemble <= 47;
+      if (!isSell) return false;
     }
 
     // 2. Lọc theo Sector
-    if (state.filterSector !== 'all') {
-      const sec = (p.sector || '').toLowerCase();
-      const targetSec = state.filterSector.toLowerCase();
-      if (!sec.includes(targetSec)) return false;
+    if (!matchStockSector(p, state.filterSector)) {
+      return false;
     }
 
     // 3. Tìm kiếm theo keyword
@@ -441,7 +523,7 @@ function applyScreenerFilters() {
       const kw = state.searchKeyword;
       const matchTicker = p.ticker.toLowerCase().includes(kw);
       const matchName = (p.name || '').toLowerCase().includes(kw);
-      const matchSector = (p.sector || '').toLowerCase().includes(kw);
+      const matchSector = `${p.sector || ''} ${p.sector_en || ''}`.toLowerCase().includes(kw);
       if (!matchTicker && !matchName && !matchSector) return false;
     }
 
@@ -453,12 +535,20 @@ function applyScreenerFilters() {
   }
 
   if (filtered.length === 0) {
+    let helpMsg = 'Không tìm thấy mã cổ phiếu nào phù hợp với bộ lọc hiện tại.';
+    if (state.filterSignal === 'buy') {
+      helpMsg = 'Hiện tại hệ thống không có khuyến nghị MUA cho phiên này do thị trường đang trong pha điều chỉnh / đi ngang. Bạn có thể xem các mã ở nhóm "Theo Dõi" hoặc bấm "Tất Cả".';
+    } else if (state.filterSignal === 'sell') {
+      helpMsg = 'Không có mã cổ phiếu nào có tín hiệu BÁN trong danh mục đã chọn.';
+    }
+
     tbody.innerHTML = `
       <tr>
         <td colspan="9" class="table-empty">
           <div class="empty-state-box">
             <span class="empty-state-icon">🔍</span>
-            <p>Không tìm thấy mã cổ phiếu nào phù hợp với bộ lọc hiện tại.</p>
+            <p>${helpMsg}</p>
+            <button class="btn-reset-filters" onclick="resetScreenerFilters()">Đặt Lại Bộ Lọc</button>
           </div>
         </td>
       </tr>

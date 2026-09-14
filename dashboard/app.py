@@ -38,22 +38,35 @@ TICKERS_META = {
     'MSFT': {'name': 'Microsoft Corp.', 'sector': 'Công nghệ'},
     'NVDA': {'name': 'NVIDIA Corp.', 'sector': 'Công nghệ'},
     'GOOGL': {'name': 'Alphabet Inc.', 'sector': 'Công nghệ'},
-    'AMZN': {'name': 'Amazon.com Inc.', 'sector': 'Hàng tiêu dùng không thiết yếu'},
-    'JPM': {'name': 'JPMorgan Chase & Co.', 'sector': 'Tài chính - Ngân hàng'},
-    'V': {'name': 'Visa Inc.', 'sector': 'Dịch vụ Tài chính'},
-    'JNJ': {'name': 'Johnson & Johnson', 'sector': 'Y tế & Chăm sóc sức khỏe'},
-    'UNH': {'name': 'UnitedHealth Group', 'sector': 'Bảo hiểm Y tế'},
-    'XOM': {'name': 'Exxon Mobil Corp.', 'sector': 'Năng lượng & Dầu khí'},
-    'CVX': {'name': 'Chevron Corp.', 'sector': 'Năng lượng & Dầu khí'},
-    'PG': {'name': 'Procter & Gamble Co.', 'sector': 'Hàng tiêu dùng thiết yếu'},
-    'KO': {'name': 'Coca-Cola Co.', 'sector': 'Đồ uống & Hàng tiêu dùng'},
-    'WMT': {'name': 'Walmart Inc.', 'sector': 'Bán lẻ & Tiêu dùng'},
-    'MCD': {'name': "McDonald's Corp.", 'sector': 'Dịch vụ Ăn uống'},
-    'NKE': {'name': 'Nike Inc.', 'sector': 'Thời trang & Thể thao'},
-    'CAT': {'name': 'Caterpillar Inc.', 'sector': 'Công nghiệp Chế tạo'},
-    'BA': {'name': 'Boeing Co.', 'sector': 'Hàng không & Quốc phòng'},
+    'AMZN': {'name': 'Amazon.com Inc.', 'sector': 'Hàng tiêu dùng'},
+    'JPM': {'name': 'JPMorgan Chase & Co.', 'sector': 'Tài chính'},
+    'V': {'name': 'Visa Inc.', 'sector': 'Tài chính'},
+    'JNJ': {'name': 'Johnson & Johnson', 'sector': 'Y tế'},
+    'UNH': {'name': 'UnitedHealth Group', 'sector': 'Y tế'},
+    'XOM': {'name': 'Exxon Mobil Corp.', 'sector': 'Năng lượng'},
+    'CVX': {'name': 'Chevron Corp.', 'sector': 'Năng lượng'},
+    'PG': {'name': 'Procter & Gamble Co.', 'sector': 'Hàng tiêu dùng'},
+    'KO': {'name': 'Coca-Cola Co.', 'sector': 'Hàng tiêu dùng'},
+    'WMT': {'name': 'Walmart Inc.', 'sector': 'Hàng tiêu dùng'},
+    'MCD': {'name': "McDonald's Corp.", 'sector': 'Hàng tiêu dùng'},
+    'NKE': {'name': 'Nike Inc.', 'sector': 'Hàng tiêu dùng'},
+    'CAT': {'name': 'Caterpillar Inc.', 'sector': 'Công nghiệp'},
+    'BA': {'name': 'Boeing Co.', 'sector': 'Công nghiệp'},
     'NEE': {'name': 'NextEra Energy Inc.', 'sector': 'Năng lượng & Tiện ích'},
-    'LIN': {'name': 'Linde plc', 'sector': 'Vật liệu Công nghiệp'},
+    'LIN': {'name': 'Linde plc', 'sector': 'Công nghiệp'},
+}
+
+SECTOR_TRANSLATION = {
+    'Technology': 'Công nghệ',
+    'Financials': 'Tài chính',
+    'Financial Services': 'Tài chính',
+    'Healthcare': 'Y tế',
+    'Consumer Discretionary': 'Hàng tiêu dùng',
+    'Consumer Staples': 'Hàng tiêu dùng',
+    'Energy': 'Năng lượng',
+    'Utilities': 'Năng lượng & Tiện ích',
+    'Industrials': 'Công nghiệp',
+    'Materials': 'Công nghiệp',
 }
 
 # Cache for heavy datasets (TTL in seconds)
@@ -185,10 +198,14 @@ def get_market_data():
                 target = round(cur_p * (1.0 + tp_pct / 100.0), 2) if is_buy else 0.0
                 stop_loss = round(cur_p * (1.0 - sl_pct / 100.0), 2) if is_buy else 0.0
 
+                raw_sector = str(r.get('nhom_nganh', ''))
+                vn_sector = SECTOR_TRANSLATION.get(raw_sector, TICKERS_META.get(ticker, {}).get('sector', 'Công nghệ'))
+
                 predictions.append({
                     "ticker": ticker,
                     "name": TICKERS_META.get(ticker, {}).get('name', ticker),
-                    "sector": str(r.get('nhom_nganh', TICKERS_META.get(ticker, {}).get('sector', 'General'))),
+                    "sector": vn_sector,
+                    "sector_en": raw_sector,
                     "current_price": round(cur_p, 2),
                     "prob_xgb": round(prob_xgb, 1),
                     "prob_lstm": round(prob_lstm, 1),

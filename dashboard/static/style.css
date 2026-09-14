@@ -2490,6 +2490,47 @@ body {
   box-shadow: 0 2px 10px rgba(99, 102, 241, 0.4);
 }
 
+.empty-state-box {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 36px 20px;
+  gap: 12px;
+  color: var(--text-muted);
+}
+
+.empty-state-icon {
+  font-size: 32px;
+}
+
+.empty-state-box p {
+  max-width: 480px;
+  text-align: center;
+  font-size: 13px;
+  line-height: 1.5;
+  color: #94A3B8;
+  margin: 0;
+}
+
+.btn-reset-filters {
+  background: rgba(99, 102, 241, 0.2);
+  border: 1px solid var(--accent-primary);
+  color: #A5B4FC;
+  padding: 8px 18px;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.btn-reset-filters:hover {
+  background: var(--accent-primary);
+  color: #FFFFFF;
+  box-shadow: 0 2px 10px rgba(99, 102, 241, 0.4);
+}
+
 .table-footer-info {
   display: flex;
   justify-content: space-between;
