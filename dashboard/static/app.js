@@ -566,42 +566,30 @@ function initAutoRefresh() {
 }
 
 // ==========================================================================
-// ON-DEMAND AI PIPELINE (CÀO DỮ LIỆU & PHÂN TÍCH THEO YÊU CẦU CÓ THANH TIẾN TRÌNH)
+// MINIMALIST ON-DEMAND AI PIPELINE (THANH TIẾN TRÌNH TỐI GIẢN)
 // ==========================================================================
 let isAnalyzingOnDemand = false;
 
-function showToast(message, type = 'success') {
+function showToast(message) {
   const container = document.getElementById('toast-container');
   if (!container) return;
   const toast = document.createElement('div');
-  toast.className = `toast-msg ${type}`;
-  toast.innerHTML = `
-    <span style="font-size: 18px;">${type === 'success' ? '✅' : 'ℹ️'}</span>
-    <div>${message}</div>
-  `;
+  toast.className = 'toast-msg';
+  toast.textContent = message;
   container.appendChild(toast);
   setTimeout(() => {
     toast.style.opacity = '0';
-    toast.style.transform = 'translateY(20px)';
-    toast.style.transition = 'all 0.3s ease';
-    setTimeout(() => toast.remove(), 300);
-  }, 3500);
+    toast.style.transition = 'opacity 0.2s ease';
+    setTimeout(() => toast.remove(), 250);
+  }, 2500);
 }
 
 function initAIModalListeners() {
   const modal = document.getElementById('ai-modal-overlay');
   const closeBtn = document.getElementById('ai-modal-close-btn');
-  const cancelBtn = document.getElementById('ai-modal-cancel-btn');
 
   if (closeBtn) {
     closeBtn.addEventListener('click', () => {
-      if (modal) modal.classList.remove('active');
-      isAnalyzingOnDemand = false;
-    });
-  }
-
-  if (cancelBtn) {
-    cancelBtn.addEventListener('click', () => {
       if (modal) modal.classList.remove('active');
       isAnalyzingOnDemand = false;
     });
@@ -624,25 +612,8 @@ function initAIModalListeners() {
   });
 }
 
-function setModalStep(stepNum, status, badgeText) {
-  const stepEl = document.getElementById(`ai-step-${stepNum}`);
-  const badgeEl = document.getElementById(`ai-step-${stepNum}-badge`);
-  if (!stepEl || !badgeEl) return;
-  stepEl.classList.remove('waiting', 'running', 'done');
-  stepEl.classList.add(status);
-  badgeEl.textContent = badgeText;
-}
-
-function appendLogLine(text, isSuccess = false) {
-  const body = document.getElementById('ai-log-body');
-  if (!body) return;
-  const line = document.createElement('div');
-  line.className = `log-line ${isSuccess ? 'success' : ''}`;
-  const now = new Date().toTimeString().split(' ')[0];
-  line.textContent = `[${now}] ${text}`;
-  body.appendChild(line);
-  body.scrollTop = body.scrollHeight;
-}
+function setModalStep() {}
+function appendLogLine() {}
 
 function setModalProgress(pct, statusText) {
   const bar = document.getElementById('ai-progress-bar-fill');
@@ -660,62 +631,28 @@ async function runOnDemandAnalysis(ticker) {
 
   const modal = document.getElementById('ai-modal-overlay');
   const symEl = document.getElementById('ai-modal-ticker-symbol');
-  const logBody = document.getElementById('ai-log-body');
 
   if (symEl) symEl.textContent = ticker;
-  if (logBody) logBody.innerHTML = '';
-
-  // Đặt lại các bước về trạng thái chờ
-  for (let i = 1; i <= 5; i++) {
-    setModalStep(i, 'waiting', 'Chờ...');
-  }
-  setModalProgress(5, `Đang khởi tạo pipeline phân tích cho ${ticker}...`);
-  appendLogLine(`Bắt đầu pipeline AI on-demand cho mã ${ticker}...`);
+  setModalProgress(15, 'Đang cào dữ liệu nến & tin tức...');
 
   if (modal) modal.classList.add('active');
 
-  // Bước 1: Cào nến OHLCV & tin tức
-  setModalStep(1, 'running', '⚡ Đang cào...');
-  setModalProgress(20, `🌐 [1/5] Đang kết nối thị trường & cào nến OHLCV + tin tức cho ${ticker}...`);
-  appendLogLine(`Kết nối yfinance API tải 6 tháng dữ liệu nến và 8 tin tức mới nhất...`);
-
-  // Bắt đầu gọi API thực tế
+  // Gọi API backend
   const fetchPromise = fetch(`/api/analyze?symbol=${encodeURIComponent(ticker)}`)
     .then(r => r.json())
     .catch(err => ({ status: 'error', message: err.message }));
 
-  // Bước 2: Chạy XGBoost
-  await new Promise(r => setTimeout(r, 450));
-  setModalStep(1, 'done', '✅ Đã tải');
-  setModalStep(2, 'running', '⚡ Đang tính...');
-  setModalProgress(45, `🌲 [2/5] Trích xuất 69 đặc trưng kỹ thuật (RSI, MACD, MA) & chạy XGBoost...`);
-  appendLogLine(`Tính toán RSI 14, MACD, SMA20/50, Volume Trend & nạp mô hình XGBoost...`);
+  await new Promise(r => setTimeout(r, 300));
+  setModalProgress(50, 'Đang chạy mô hình XGBoost & LSTM...');
 
-  // Bước 3: Chạy LSTM
-  await new Promise(r => setTimeout(r, 450));
-  setModalStep(2, 'done', '✅ Hoàn tất');
-  setModalStep(3, 'running', '⚡ Đang dự báo...');
-  setModalProgress(70, `🧠 [3/5] Dự báo xu hướng chuỗi thời gian Deep Learning LSTM...`);
-  appendLogLine(`Đang phân tích chuỗi thời gian đa khung giá qua mạng nơ-ron LSTM...`);
+  await new Promise(r => setTimeout(r, 400));
+  setModalProgress(80, 'Đang phân tích FinBERT & Ensemble...');
 
-  // Bước 4: Chạy FinBERT NLP
-  await new Promise(r => setTimeout(r, 450));
-  setModalStep(3, 'done', '✅ Hoàn tất');
-  setModalStep(4, 'running', '⚡ Đang xử lý NLP...');
-  setModalProgress(88, `📰 [4/5] Phân tích cảm xúc tin tức tài chính FinBERT NLP...`);
-  appendLogLine(`Đang quét tiêu đề tin tức tài chính & phân loại trọng số FinBERT NLP...`);
-
-  // Chờ kết quả từ API backend
   const data = await fetchPromise;
 
   if (data && data.status === 'success' && data.prediction) {
     const pred = data.prediction;
-    await new Promise(r => setTimeout(r, 350));
-    setModalStep(4, 'done', '✅ Hoàn tất');
-    setModalStep(5, 'done', '✅ Hoàn thành');
-    setModalProgress(100, `👑 [5/5] Hoàn tất phân tích Master Ensemble cho ${ticker}!`);
-    appendLogLine(`Tổng hợp Master Ensemble: ${pred.prob_ensemble}% (${pred.pp4_tong_hop}) - ${pred.trang_thai}`, true);
-    appendLogLine(`Kế hoạch: Entry $${pred.plan_entry} | TP $${pred.plan_target} (+${pred.plan_tp_pct}%) | SL $${pred.plan_stop_loss} (-${pred.plan_sl_pct}%)`, true);
+    setModalProgress(100, 'Hoàn tất phân tích!');
 
     // Hợp nhất vào state.marketData.predictions
     if (!state.marketData.predictions) state.marketData.predictions = [];
@@ -726,7 +663,7 @@ async function runOnDemandAnalysis(ticker) {
       state.marketData.predictions.push(pred);
     }
 
-    // Đánh dấu vào danh bạ tìm kiếm
+    // Cập nhật danh bạ tìm kiếm
     let dirItem = SEARCH_DIRECTORY.find(i => i.ticker.toUpperCase() === pred.ticker.toUpperCase());
     if (dirItem) {
       dirItem.isAnalyzed = true;
@@ -740,25 +677,22 @@ async function runOnDemandAnalysis(ticker) {
       });
     }
 
-    // Cập nhật giao diện Screener & chọn mã vừa phân tích
     applyScreenerFilters();
     selectTicker(pred.ticker, false);
 
-    showToast(`🚀 Đã hoàn tất phân tích 4 mô hình AI cho ${pred.ticker}! (${pred.pp4_tong_hop})`, 'success');
+    showToast(`Đã phân tích xong ${pred.ticker} (${pred.pp4_tong_hop})`);
 
-    // Đóng modal sau khi hoàn thành 850ms để người dùng kịp thấy 100%
     setTimeout(() => {
       if (modal) modal.classList.remove('active');
       isAnalyzingOnDemand = false;
-    }, 850);
+    }, 450);
   } else {
-    appendLogLine(`❌ Lỗi: ${data ? data.message : 'Không nhận được kết quả từ máy chủ'}`);
-    setModalProgress(100, `⚠️ Phân tích gián đoạn`);
-    showToast(`Không thể phân tích mã ${ticker}: ${data ? data.message : 'Lỗi kết nối'}`, 'error');
+    setModalProgress(100, 'Lỗi phân tích');
+    showToast(`Không thể phân tích mã ${ticker}`);
     setTimeout(() => {
       if (modal) modal.classList.remove('active');
       isAnalyzingOnDemand = false;
-    }, 1500);
+    }, 1000);
   }
 }
 window.runOnDemandAnalysis = runOnDemandAnalysis;
@@ -1027,27 +961,17 @@ function applyScreenerFilters() {
         tbody.innerHTML = `
           <tr>
             <td colspan="9" class="table-empty">
-              <div class="outside-stock-card">
-                <div class="outside-stock-header">
-                  <span class="outside-ticker">${outsideMatch.ticker}</span>
-                  <span class="outside-name">${outsideMatch.name}</span>
-                  <span class="outside-sector">${outsideMatch.sector}</span>
-                  <span class="sugg-badge ondemand">⚡ Phân Tích AI On-Demand</span>
-                </div>
-                <div class="outside-stock-desc">
-                  Mã <strong>${outsideMatch.ticker}</strong> chưa có kết quả phân tích trong phiên này. Bấm nút bên dưới để hệ thống tự động cào nến giá OHLCV, tin tức và kích hoạt 4 mô hình AI (XGBoost, LSTM, FinBERT & Master Ensemble) ngay tức thì kèm thanh tiến trình!
-                </div>
-                <div class="outside-stock-actions">
-                  <button class="btn-analyze-now" onclick="runOnDemandAnalysis('${outsideMatch.ticker}')">
-                    ⚡ Cào Dữ Liệu & Phân Tích AI Cho ${outsideMatch.ticker} (Xem Tiến Trình) →
-                  </button>
-                  <button class="btn-view-chart-now" onclick="selectTicker('${outsideMatch.ticker}', true)">
-                    📈 Xem Biểu Đồ Nến Live →
-                  </button>
-                  <button class="btn-reset-filters" onclick="resetScreenerFilters()">
-                    ✕ Về 20 Mã Mặc Định
-                  </button>
-                </div>
+              <div class="outside-stock-simple">
+                <span>Mã <strong>${outsideMatch.ticker}</strong> (${outsideMatch.name}) chưa phân tích AI.</span>
+                <button class="btn-analyze-now" onclick="runOnDemandAnalysis('${outsideMatch.ticker}')">
+                  ⚡ Phân Tích ${outsideMatch.ticker}
+                </button>
+                <button class="btn-analyze-now" style="background:#334155; border-color:#475569;" onclick="selectTicker('${outsideMatch.ticker}', true)">
+                  Biểu Đồ Nến
+                </button>
+                <button class="btn-analyze-now" style="background:transparent; border-color:#475569; color:#94a3b8;" onclick="resetScreenerFilters()">
+                  ✕ Xóa
+                </button>
               </div>
             </td>
           </tr>
@@ -1057,22 +981,14 @@ function applyScreenerFilters() {
         tbody.innerHTML = `
           <tr>
             <td colspan="9" class="table-empty">
-              <div class="outside-stock-card">
-                <div class="outside-stock-header">
-                  <span class="outside-ticker">${rawKw}</span>
-                  <span class="sugg-badge ondemand">⚡ Cào Dữ Liệu & Phân Tích Mới</span>
-                </div>
-                <div class="outside-stock-desc">
-                  Mã <strong>${rawKw}</strong> chưa có trong danh mục. Hệ thống sẵn sàng cào trực tiếp nến OHLCV, trích xuất 69 chỉ báo kỹ thuật, chạy học sâu LSTM và phân tích cảm xúc FinBERT NLP cho mã này!
-                </div>
-                <div class="outside-stock-actions">
-                  <button class="btn-analyze-now" onclick="runOnDemandAnalysis('${rawKw}')">
-                    ⚡ Cào Dữ Liệu & Chạy 4 Mô Hình AI Cho ${rawKw} →
-                  </button>
-                  <button class="btn-reset-filters" onclick="resetScreenerFilters()">
-                    ✕ Về 20 Mã Mặc Định
-                  </button>
-                </div>
+              <div class="outside-stock-simple">
+                <span>Mã <strong>${rawKw}</strong> chưa có dữ liệu AI.</span>
+                <button class="btn-analyze-now" onclick="runOnDemandAnalysis('${rawKw}')">
+                  ⚡ Phân Tích ${rawKw}
+                </button>
+                <button class="btn-analyze-now" style="background:transparent; border-color:#475569; color:#94a3b8;" onclick="resetScreenerFilters()">
+                  ✕ Xóa
+                </button>
               </div>
             </td>
           </tr>
@@ -1327,18 +1243,18 @@ function updateTickerPredictions(ticker) {
     if (pred) {
       statusNoteEl.innerHTML = `
         <div class="model-status-pill core">
-          ⚡ <strong>${pred.on_demand ? 'Phân Tích AI On-Demand' : '20 Cổ Phiếu Cốt Lõi'} (${ticker})</strong>: Đã đồng bộ đầy đủ 4 mô hình AI (XGB: ${pred.prob_xgb}%, LSTM: ${pred.prob_lstm}%, FinBERT: ${pred.prob_bert}%, Ensemble: ${pred.prob_ensemble}%).
+          ⚡ <strong>${pred.on_demand ? 'On-Demand' : '20 Mã Lõi'} (${ticker})</strong>: XGB ${pred.prob_xgb}%, LSTM ${pred.prob_lstm}%, BERT ${pred.prob_bert}%, Ensemble ${pred.prob_ensemble}%.
           <button class="btn-reanalyze" onclick="runOnDemandAnalysis('${ticker}')">
-            🔄 Cập Nhật & Phân Tích Lại Cho ${ticker}
+            🔄 Phân tích lại ${ticker}
           </button>
         </div>
       `;
     } else {
       statusNoteEl.innerHTML = `
         <div class="model-status-pill outside">
-          ℹ️ <strong>Mã Tra Cứu Mở Rộng (${ticker})</strong>: Dữ liệu nến OHLCV & RSI đang trực tuyến từ thị trường. Chưa có kết quả phân tích 4 mô hình AI.
-          <button class="btn-analyze-now" style="margin-top: 10px; width: 100%; justify-content: center;" onclick="runOnDemandAnalysis('${ticker}')">
-            ⚡ Cào Dữ Liệu & Phân Tích 4 Mô Hình AI Cho ${ticker}
+          Chưa có phân tích AI cho ${ticker}.
+          <button class="btn-analyze-now" style="margin-top: 8px; width: 100%; justify-content: center;" onclick="runOnDemandAnalysis('${ticker}')">
+            ⚡ Phân tích AI ngay
           </button>
         </div>
       `;
