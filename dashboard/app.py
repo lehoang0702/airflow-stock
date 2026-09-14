@@ -56,6 +56,40 @@ TICKERS_META = {
     'LIN': {'name': 'Linde plc', 'sector': 'Công nghiệp'},
 }
 
+EXTENDED_TICKERS_META = {
+    'TSLA': {'name': 'Tesla Inc.', 'sector': 'Hàng tiêu dùng / Ô tô điện'},
+    'T': {'name': 'AT&T Inc.', 'sector': 'Viễn thông & Công nghệ'},
+    'TXN': {'name': 'Texas Instruments Inc.', 'sector': 'Bán dẫn & Công nghệ'},
+    'TMO': {'name': 'Thermo Fisher Scientific', 'sector': 'Y tế & Thiết bị'},
+    'TMUS': {'name': 'T-Mobile US Inc.', 'sector': 'Viễn thông'},
+    'TGT': {'name': 'Target Corporation', 'sector': 'Hàng tiêu dùng'},
+    'META': {'name': 'Meta Platforms Inc.', 'sector': 'Công nghệ'},
+    'AMD': {'name': 'Advanced Micro Devices', 'sector': 'Bán dẫn & Công nghệ'},
+    'NFLX': {'name': 'Netflix Inc.', 'sector': 'Truyền thông & Giải trí'},
+    'INTC': {'name': 'Intel Corporation', 'sector': 'Bán dẫn & Công nghệ'},
+    'CRM': {'name': 'Salesforce Inc.', 'sector': 'Công nghệ'},
+    'ADBE': {'name': 'Adobe Inc.', 'sector': 'Công nghệ'},
+    'ORCL': {'name': 'Oracle Corporation', 'sector': 'Công nghệ'},
+    'QCOM': {'name': 'Qualcomm Inc.', 'sector': 'Bán dẫn & Công nghệ'},
+    'AVGO': {'name': 'Broadcom Inc.', 'sector': 'Bán dẫn & Công nghệ'},
+    'CSCO': {'name': 'Cisco Systems Inc.', 'sector': 'Công nghệ'},
+    'BAC': {'name': 'Bank of America Corp.', 'sector': 'Tài chính'},
+    'MA': {'name': 'Mastercard Inc.', 'sector': 'Tài chính'},
+    'DIS': {'name': 'Walt Disney Co.', 'sector': 'Truyền thông & Giải trí'},
+    'PYPL': {'name': 'PayPal Holdings Inc.', 'sector': 'Tài chính & Fintech'},
+    'UBER': {'name': 'Uber Technologies Inc.', 'sector': 'Công nghệ & Vận tải'},
+    'PLTR': {'name': 'Palantir Technologies', 'sector': 'Trí tuệ nhân tạo (AI)'},
+    'COIN': {'name': 'Coinbase Global Inc.', 'sector': 'Tài chính & Crypto'},
+    'BABA': {'name': 'Alibaba Group Holding', 'sector': 'Thương mại điện tử'},
+    'COST': {'name': 'Costco Wholesale Corp.', 'sector': 'Hàng tiêu dùng'},
+    'F': {'name': 'Ford Motor Co.', 'sector': 'Hàng tiêu dùng & Ô tô'},
+    'GM': {'name': 'General Motors Co.', 'sector': 'Hàng tiêu dùng & Ô tô'},
+    'PFE': {'name': 'Pfizer Inc.', 'sector': 'Y tế & Dược phẩm'},
+    'LLY': {'name': 'Eli Lilly and Company', 'sector': 'Y tế & Dược phẩm'},
+    'ABBV': {'name': 'AbbVie Inc.', 'sector': 'Y tế & Dược phẩm'},
+    'COP': {'name': 'ConocoPhillips', 'sector': 'Năng lượng'},
+}
+
 SECTOR_TRANSLATION = {
     'Technology': 'Công nghệ',
     'Financials': 'Tài chính',
@@ -332,10 +366,53 @@ def get_ticker_chart(ticker: str):
             except Exception as e:
                 logging.warning(f"Error fetching news for {ticker}: {e}")
 
+    # 3. Fallback cho các mã tìm kiếm mở rộng (như TSLA, META, AMD, T...): tải trực tiếp từ yfinance
+    if not candles:
+        try:
+            import yfinance as yf
+            stock = yf.Ticker(ticker)
+            hist = stock.history(period="3mo")
+            if not hist.empty:
+                delta = hist['Close'].diff()
+                gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
+                loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+                rs = gain / loss.replace(0, 0.0001)
+                rsi_series = 100 - (100 / (1 + rs))
+                hist['rsi_14'] = rsi_series.fillna(50.0)
+
+                for dt, r in hist.tail(50).iterrows():
+                    candles.append({
+                        "date": dt.strftime("%Y-%m-%d"),
+                        "open": round(float(r['Open']), 2),
+                        "high": round(float(r['High']), 2),
+                        "low": round(float(r['Low']), 2),
+                        "close": round(float(r['Close']), 2),
+                        "volume": int(r['Volume']),
+                        "rsi": round(float(r.get('rsi_14', 50.0)), 1)
+                    })
+            if not news:
+                raw_news = stock.news or []
+                for item in raw_news[:5]:
+                    title = item.get('title')
+                    if not title and 'content' in item:
+                        title = item['content'].get('title', '')
+                    publisher = item.get('publisher') or (item.get('content', {}).get('provider', {}).get('displayName')) or 'Market News'
+                    pub_time = item.get('providerPublishTime')
+                    dt_str = datetime.fromtimestamp(pub_time).strftime('%Y-%m-%d') if pub_time else datetime.now().strftime('%Y-%m-%d')
+                    if title:
+                        news.append({
+                            "headline": title,
+                            "source": publisher,
+                            "date": dt_str
+                        })
+        except Exception as e:
+            logging.warning(f"Error fetching yfinance live data for {ticker}: {e}")
+
+    meta = TICKERS_META.get(ticker) or EXTENDED_TICKERS_META.get(ticker) or {'name': ticker, 'sector': 'Thị trường Mỹ'}
     result = {
         "ticker": ticker,
-        "name": TICKERS_META.get(ticker, {}).get('name', ticker),
-        "sector": TICKERS_META.get(ticker, {}).get('sector', 'Công nghệ'),
+        "name": meta.get('name', ticker),
+        "sector": meta.get('sector', 'Công nghệ'),
         "candles": candles,
         "news": news
     }
