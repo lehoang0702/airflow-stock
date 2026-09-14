@@ -43,6 +43,12 @@ let state = {
 // INITIALIZATION
 // ==========================================================================
 document.addEventListener('DOMContentLoaded', () => {
+  const searchInput = document.getElementById('screener-search-input');
+  if (searchInput) searchInput.value = '';
+  state.searchKeyword = '';
+  state.filterSignal = 'all';
+  state.filterSector = 'all';
+
   initMainTabs();
   initTickerPills();
   initViewButtons();
@@ -253,64 +259,26 @@ function initScreenerFilters() {
 // AUTOCOMPLETE SEARCH DIRECTORY & ON-DEMAND EXTENSION
 // ==========================================================================
 const SEARCH_DIRECTORY = [
-  // 20 Mã Lõi Core (Có sẵn dữ liệu phân tích hàng ngày)
-  { ticker: 'AAPL', name: 'Apple Inc.', sector: 'Công nghệ', is_core: true },
-  { ticker: 'MSFT', name: 'Microsoft Corp.', sector: 'Công nghệ', is_core: true },
-  { ticker: 'NVDA', name: 'NVIDIA Corp.', sector: 'Công nghệ', is_core: true },
-  { ticker: 'GOOGL', name: 'Alphabet Inc.', sector: 'Công nghệ', is_core: true },
-  { ticker: 'AMZN', name: 'Amazon.com Inc.', sector: 'Hàng tiêu dùng', is_core: true },
-  { ticker: 'JPM', name: 'JPMorgan Chase & Co.', sector: 'Tài chính', is_core: true },
-  { ticker: 'V', name: 'Visa Inc.', sector: 'Tài chính', is_core: true },
-  { ticker: 'JNJ', name: 'Johnson & Johnson', sector: 'Y tế', is_core: true },
-  { ticker: 'UNH', name: 'UnitedHealth Group', sector: 'Y tế', is_core: true },
-  { ticker: 'XOM', name: 'Exxon Mobil Corp.', sector: 'Năng lượng', is_core: true },
-  { ticker: 'CVX', name: 'Chevron Corp.', sector: 'Năng lượng', is_core: true },
-  { ticker: 'PG', name: 'Procter & Gamble Co.', sector: 'Hàng tiêu dùng', is_core: true },
-  { ticker: 'KO', name: 'Coca-Cola Co.', sector: 'Hàng tiêu dùng', is_core: true },
-  { ticker: 'WMT', name: 'Walmart Inc.', sector: 'Hàng tiêu dùng', is_core: true },
-  { ticker: 'MCD', name: "McDonald's Corp.", sector: 'Hàng tiêu dùng', is_core: true },
-  { ticker: 'NKE', name: 'Nike Inc.', sector: 'Hàng tiêu dùng', is_core: true },
-  { ticker: 'CAT', name: 'Caterpillar Inc.', sector: 'Công nghiệp', is_core: true },
-  { ticker: 'BA', name: 'Boeing Co.', sector: 'Công nghiệp', is_core: true },
-  { ticker: 'NEE', name: 'NextEra Energy Inc.', sector: 'Năng lượng & Tiện ích', is_core: true },
-  { ticker: 'LIN', name: 'Linde plc', sector: 'Công nghiệp', is_core: true },
-
-  // Danh mục mở rộng S&P 500 / NASDAQ (Gợi ý tìm kiếm & Chạy On-Demand)
-  { ticker: 'TSLA', name: 'Tesla, Inc.', sector: 'Xe điện & Năng lượng', is_core: false },
-  { ticker: 'T', name: 'AT&T Inc.', sector: 'Viễn thông', is_core: false },
-  { ticker: 'TSM', name: 'Taiwan Semiconductor', sector: 'Bán dẫn & Chip', is_core: false },
-  { ticker: 'TXN', name: 'Texas Instruments', sector: 'Bán dẫn', is_core: false },
-  { ticker: 'TMO', name: 'Thermo Fisher Scientific', sector: 'Y tế & Thiết bị', is_core: false },
-  { ticker: 'TGT', name: 'Target Corporation', sector: 'Bán lẻ & Tiêu dùng', is_core: false },
-  { ticker: 'AMD', name: 'Advanced Micro Devices', sector: 'Bán dẫn & AI', is_core: false },
-  { ticker: 'META', name: 'Meta Platforms Inc.', sector: 'Mạng xã hội & AI', is_core: false },
-  { ticker: 'NFLX', name: 'Netflix Inc.', sector: 'Truyền thông & Streaming', is_core: false },
-  { ticker: 'ORCL', name: 'Oracle Corporation', sector: 'Điện toán đám mây & DB', is_core: false },
-  { ticker: 'CRM', name: 'Salesforce Inc.', sector: 'Phần mềm Doanh nghiệp', is_core: false },
-  { ticker: 'ADBE', name: 'Adobe Inc.', sector: 'Phần mềm Đồ họa', is_core: false },
-  { ticker: 'INTC', name: 'Intel Corporation', sector: 'Bán dẫn', is_core: false },
-  { ticker: 'QCOM', name: 'Qualcomm Inc.', sector: 'Chip Di động', is_core: false },
-  { ticker: 'CSCO', name: 'Cisco Systems', sector: 'Thiết bị Mạng', is_core: false },
-  { ticker: 'IBM', name: 'International Business Machines', sector: 'Công nghệ & AI', is_core: false },
-  { ticker: 'DIS', name: 'The Walt Disney Company', sector: 'Giải trí', is_core: false },
-  { ticker: 'PYPL', name: 'PayPal Holdings', sector: 'Fintech', is_core: false },
-  { ticker: 'PEP', name: 'PepsiCo Inc.', sector: 'Thực phẩm & Đồ uống', is_core: false },
-  { ticker: 'COST', name: 'Costco Wholesale', sector: 'Bán lẻ', is_core: false },
-  { ticker: 'BAC', name: 'Bank of America', sector: 'Ngân hàng', is_core: false },
-  { ticker: 'WFC', name: 'Wells Fargo & Co.', sector: 'Ngân hàng', is_core: false },
-  { ticker: 'MA', name: 'Mastercard Inc.', sector: 'Thanh toán', is_core: false },
-  { ticker: 'ABBV', name: 'AbbVie Inc.', sector: 'Dược phẩm sinh học', is_core: false },
-  { ticker: 'MRK', name: 'Merck & Co.', sector: 'Dược phẩm', is_core: false },
-  { ticker: 'PFE', name: 'Pfizer Inc.', sector: 'Dược phẩm & Vaccine', is_core: false },
-  { ticker: 'LLY', name: 'Eli Lilly and Company', sector: 'Dược phẩm', is_core: false },
-  { ticker: 'COP', name: 'ConocoPhillips', sector: 'Dầu khí', is_core: false },
-  { ticker: 'GE', name: 'General Electric', sector: 'Hàng không & Năng lượng', is_core: false },
-  { ticker: 'HON', name: 'Honeywell International', sector: 'Công nghệ Chế tạo', is_core: false },
-  { ticker: 'UPS', name: 'United Parcel Service', sector: 'Vận chuyển Logistics', is_core: false },
-  { ticker: 'RTX', name: 'RTX Corporation', sector: 'Quốc phòng & Hàng không', is_core: false },
-  { ticker: 'SBUX', name: 'Starbucks Corporation', sector: 'Dịch vụ Cà phê', is_core: false },
-  { ticker: 'COIN', name: 'Coinbase Global', sector: 'Tiền điện tử & Fintech', is_core: false },
-  { ticker: 'PLTR', name: 'Palantir Technologies', sector: 'Phần mềm Phân tích & AI', is_core: false }
+  { ticker: 'AAPL', name: 'Apple Inc.', sector: 'Công nghệ' },
+  { ticker: 'MSFT', name: 'Microsoft Corp.', sector: 'Công nghệ' },
+  { ticker: 'NVDA', name: 'NVIDIA Corp.', sector: 'Công nghệ' },
+  { ticker: 'GOOGL', name: 'Alphabet Inc. (Google)', sector: 'Công nghệ' },
+  { ticker: 'AMZN', name: 'Amazon.com Inc.', sector: 'Hàng tiêu dùng' },
+  { ticker: 'JPM', name: 'JPMorgan Chase & Co.', sector: 'Tài chính' },
+  { ticker: 'V', name: 'Visa Inc.', sector: 'Tài chính' },
+  { ticker: 'JNJ', name: 'Johnson & Johnson', sector: 'Y tế' },
+  { ticker: 'UNH', name: 'UnitedHealth Group', sector: 'Y tế' },
+  { ticker: 'XOM', name: 'Exxon Mobil Corp.', sector: 'Năng lượng' },
+  { ticker: 'CVX', name: 'Chevron Corp.', sector: 'Năng lượng' },
+  { ticker: 'PG', name: 'Procter & Gamble Co.', sector: 'Hàng tiêu dùng' },
+  { ticker: 'KO', name: 'Coca-Cola Co.', sector: 'Hàng tiêu dùng' },
+  { ticker: 'WMT', name: 'Walmart Inc.', sector: 'Hàng tiêu dùng' },
+  { ticker: 'MCD', name: "McDonald's Corp.", sector: 'Hàng tiêu dùng' },
+  { ticker: 'NKE', name: 'Nike Inc.', sector: 'Hàng tiêu dùng' },
+  { ticker: 'CAT', name: 'Caterpillar Inc.', sector: 'Công nghiệp' },
+  { ticker: 'BA', name: 'Boeing Co.', sector: 'Công nghiệp' },
+  { ticker: 'NEE', name: 'NextEra Energy Inc.', sector: 'Năng lượng & Tiện ích' },
+  { ticker: 'LIN', name: 'Linde plc', sector: 'Công nghiệp' },
 ];
 
 function highlightMatch(text, query) {
@@ -347,11 +315,12 @@ function initSearchAutocomplete() {
     SEARCH_DIRECTORY.forEach(item => {
       const t = item.ticker.toLowerCase();
       const n = item.name.toLowerCase();
+      const s = (item.sector || '').toLowerCase();
       if (t.startsWith(q)) {
         prefixTicker.push(item);
       } else if (n.startsWith(q)) {
         prefixName.push(item);
-      } else if (t.includes(q) || n.includes(q)) {
+      } else if (t.includes(q) || n.includes(q) || s.includes(q)) {
         substringMatch.push(item);
       }
     });
@@ -362,7 +331,7 @@ function initSearchAutocomplete() {
       dropdown.innerHTML = `
         <div class="suggestion-header">GỢI Ý TÌM KIẾM</div>
         <div style="padding: 12px 14px; font-size: 12px; color: var(--text-muted); text-align: center;">
-          Không tìm thấy mã hoặc doanh nghiệp khớp với "<strong>${query}</strong>"
+          Không tìm thấy mã nào trong danh mục 20 cổ phiếu khớp với "<strong>${query}</strong>"
         </div>
       `;
       dropdown.classList.remove('hidden');
@@ -371,7 +340,7 @@ function initSearchAutocomplete() {
 
     dropdown.innerHTML = `
       <div class="suggestion-header">
-        <span>GỢI Ý MÃ CỔ PHIẾU (${matches.length})</span>
+        <span>GỢI Ý CỔ PHIẾU (${matches.length})</span>
         <span style="font-weight: normal; opacity: 0.8;">Nhấn Enter hoặc Click để chọn</span>
       </div>
       ${matches.map((s, idx) => `
@@ -382,9 +351,7 @@ function initSearchAutocomplete() {
           </div>
           <div class="sugg-right">
             <span class="sugg-sector">${s.sector}</span>
-            <span class="sugg-badge ${s.is_core ? 'core' : 'ondemand'}">
-              ${s.is_core ? '⚡ 20 Mã Lõi' : '🚀 Chạy Theo Yêu Cầu'}
-            </span>
+            <span class="sugg-badge core">⚡ 20 Mã Lõi</span>
           </div>
         </div>
       `).join('')}
@@ -491,135 +458,6 @@ function selectSearchSuggestion(ticker) {
   applyScreenerFilters();
 }
 window.selectSearchSuggestion = selectSearchSuggestion;
-
-function triggerOnDemandModal(ticker, name) {
-  const modal = document.getElementById('on-demand-modal');
-  const modalBody = document.getElementById('ondemand-modal-body');
-  if (!modal || !modalBody) return;
-
-  modalBody.innerHTML = `
-    <div class="ondemand-modal-content">
-      <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px;">
-        <div>
-          <span style="font-family: var(--font-heading); font-size: 24px; font-weight: 900; color: #FFFFFF;">${ticker}</span>
-          <span style="font-size: 14px; color: #A5B4FC; margin-left: 8px;">${name}</span>
-        </div>
-        <span class="sugg-badge ondemand">MÃ NGOÀI 20 CORE</span>
-      </div>
-
-      <p style="font-size: 13px; color: var(--text-secondary); line-height: 1.5; margin-bottom: 16px;">
-        Hệ thống Airflow sẽ thực thi pipeline định lượng độc lập cho <strong>${ticker}</strong> theo quy trình 4 giai đoạn tự động:
-      </p>
-
-      <div class="ondemand-steps-list">
-        <div class="ondemand-step-item">
-          <div class="ondemand-step-num">1</div>
-          <div class="ondemand-step-text">
-            <strong>Cào Dữ Liệu Lịch Sử 10 Năm (${ticker})</strong>
-            <div style="font-size: 11px; color: var(--text-muted);">Nến giá OHLCV, khối lượng và tin tức tài chính Finviz.</div>
-          </div>
-        </div>
-        <div class="ondemand-step-item">
-          <div class="ondemand-step-num">2</div>
-          <div class="ondemand-step-text">
-            <strong>Tính Toán 115+ Chỉ Báo Toán Học</strong>
-            <div style="font-size: 11px; color: var(--text-muted);">RSI, MACD, Bollinger Bands, ATR, ADX, Momentum.</div>
-          </div>
-        </div>
-        <div class="ondemand-step-item">
-          <div class="ondemand-step-num">3</div>
-          <div class="ondemand-step-text">
-            <strong>Suy Luận Đồng Thời 3 Mô Hình AI</strong>
-            <div style="font-size: 11px; color: var(--text-muted);">XGBoost (Kỹ thuật) + LSTM (Chuỗi giá) + FinBERT (Tin tức).</div>
-          </div>
-        </div>
-        <div class="ondemand-step-item">
-          <div class="ondemand-step-num">4</div>
-          <div class="ondemand-step-text">
-            <strong>Tổng Hợp Tín Hiệu Master Ensemble & Xuất Báo Cáo</strong>
-            <div style="font-size: 11px; color: var(--text-muted);">Lưu kết quả lên MinIO S3 & vẽ biểu đồ nến kèm vùng Mua/Bán.</div>
-          </div>
-        </div>
-      </div>
-
-      <div class="ondemand-progress-box" id="ondemand-progress-container" style="display: none;">
-        <div style="display: flex; justify-content: space-between; font-size: 12px; font-weight: 600;">
-          <span id="ondemand-status-text" style="color: #A5B4FC;">Đang kết nối tới Airflow Webserver...</span>
-          <span id="ondemand-pct-text" style="color: #34D399;">0%</span>
-        </div>
-        <div class="ondemand-progress-bar-wrap">
-          <div class="ondemand-progress-bar-fill" id="ondemand-progress-bar"></div>
-        </div>
-      </div>
-
-      <div style="margin-top: 20px; display: flex; justify-content: flex-end; gap: 10px;">
-        <button class="btn-reset-filters" style="margin-top: 0; background: rgba(30, 41, 59, 0.8); border-color: rgba(255, 255, 255, 0.1);" onclick="closeOnDemandModal()">
-          Đóng
-        </button>
-        <button class="btn-trigger-on-demand" id="btn-start-ondemand" onclick="simulateOnDemandExecution('${ticker}')">
-          🚀 Bắt Đầu Phân Tích (${ticker})
-        </button>
-      </div>
-    </div>
-  `;
-
-  modal.classList.remove('hidden');
-
-  const closeBtn = document.getElementById('close-ondemand-modal');
-  if (closeBtn) {
-    closeBtn.onclick = closeOnDemandModal;
-  }
-}
-window.triggerOnDemandModal = triggerOnDemandModal;
-
-function closeOnDemandModal() {
-  const modal = document.getElementById('on-demand-modal');
-  if (modal) modal.classList.add('hidden');
-}
-window.closeOnDemandModal = closeOnDemandModal;
-
-function simulateOnDemandExecution(ticker) {
-  const progBox = document.getElementById('ondemand-progress-container');
-  const bar = document.getElementById('ondemand-progress-bar');
-  const statusTxt = document.getElementById('ondemand-status-text');
-  const pctTxt = document.getElementById('ondemand-pct-text');
-  const startBtn = document.getElementById('btn-start-ondemand');
-
-  if (progBox) progBox.style.display = 'block';
-  if (startBtn) {
-    startBtn.disabled = true;
-    startBtn.style.opacity = '0.5';
-    startBtn.textContent = '⏳ Đang Thực Thi...';
-  }
-
-  const steps = [
-    { pct: 20, text: `Gửi lệnh POST /api/v1/dags/dag_master_orchestrator (conf: ${ticker})...` },
-    { pct: 45, text: `Đang cào 10 năm lịch sử giá & tin tức ${ticker}...` },
-    { pct: 75, text: `Đang chạy suy luận XGBoost + LSTM + FinBERT...` },
-    { pct: 95, text: `Ensemble Master đang xuất báo cáo lên MinIO...` },
-    { pct: 100, text: `Hoàn tất phân tích AI cho ${ticker}!` }
-  ];
-
-  let stepIdx = 0;
-  const timer = setInterval(() => {
-    if (stepIdx < steps.length) {
-      const s = steps[stepIdx];
-      if (bar) bar.style.width = `${s.pct}%`;
-      if (pctTxt) pctTxt.textContent = `${s.pct}%`;
-      if (statusTxt) statusTxt.textContent = s.text;
-      stepIdx++;
-    } else {
-      clearInterval(timer);
-      setTimeout(() => {
-        if (startBtn) {
-          startBtn.textContent = '✓ Phân Tích Thành Công!';
-          startBtn.style.background = '#10B981';
-        }
-      }, 500);
-    }
-  }, 900);
-}
-window.simulateOnDemandExecution = simulateOnDemandExecution;
 
 // 6. Nút làm mới dữ liệu
 function initEventListeners() {
@@ -887,43 +725,10 @@ function applyScreenerFilters() {
   }
 
   if (filtered.length === 0) {
-    // Kiểm tra xem người dùng có đang tìm kiếm một mã mở rộng (On-Demand) không
-    const extMatch = SEARCH_DIRECTORY.find(s => !s.is_core && (
-      s.ticker.toLowerCase() === state.searchKeyword ||
-      s.name.toLowerCase().includes(state.searchKeyword)
-    ));
-
-    if (extMatch) {
-      tbody.innerHTML = `
-        <tr>
-          <td colspan="9" class="table-empty">
-            <div class="on-demand-trigger-box">
-              <div class="on-demand-badge">⚡ MÃ CỔ PHIẾU NGOÀI DANH MỤC 20 BLUE-CHIPS</div>
-              <div class="on-demand-identity">
-                <span class="on-demand-sym">${extMatch.ticker}</span>
-                <span class="on-demand-title">${extMatch.name}</span>
-                <span class="on-demand-sector">${extMatch.sector}</span>
-              </div>
-              <p class="on-demand-desc">
-                Mã <strong>${extMatch.ticker}</strong> thuộc danh mục mở rộng S&P 500 / NASDAQ. Bạn có thể kích hoạt hệ thống Airflow để tự động cào nến lịch sử 10 năm và thực thi pipeline AI định lượng theo yêu cầu (On-Demand).
-              </p>
-              <div class="on-demand-actions">
-                <button class="btn-trigger-on-demand" onclick="triggerOnDemandModal('${extMatch.ticker}', '${extMatch.name}')">
-                  🚀 Kích Hoạt Dự Báo AI Cho ${extMatch.ticker} (~30s)
-                </button>
-                <button class="btn-reset-filters" onclick="resetScreenerFilters()">
-                  ✕ Xóa Tìm Kiếm (Quay Lại 20 Mã Mặc Định)
-                </button>
-              </div>
-            </div>
-          </td>
-        </tr>
-      `;
-      return;
-    }
-
     let helpMsg = 'Không tìm thấy mã cổ phiếu nào phù hợp với bộ lọc hiện tại.';
-    if (state.filterSignal === 'buy') {
+    if (state.searchKeyword) {
+      helpMsg = `Không tìm thấy mã hoặc doanh nghiệp nào khớp với từ khóa "<strong>${state.searchKeyword}</strong>" trong danh mục 20 cổ phiếu lõi.`;
+    } else if (state.filterSignal === 'buy') {
       helpMsg = 'Hiện tại hệ thống không có khuyến nghị MUA cho phiên này do thị trường đang trong pha điều chỉnh / đi ngang. Bạn có thể xem các mã ở nhóm "Theo Dõi" hoặc bấm "Tất Cả".';
     } else if (state.filterSignal === 'sell') {
       helpMsg = 'Không có mã cổ phiếu nào có tín hiệu BÁN trong danh mục đã chọn.';
@@ -935,7 +740,9 @@ function applyScreenerFilters() {
           <div class="empty-state-box">
             <span class="empty-state-icon">🔍</span>
             <p>${helpMsg}</p>
-            <button class="btn-reset-filters" onclick="resetScreenerFilters()">Đặt Lại Bộ Lọc</button>
+            <button class="btn-reset-filters" onclick="resetScreenerFilters()">
+              ✕ Xóa Tìm Kiếm & Hiển Thị 20 Mã Mặc Định
+            </button>
           </div>
         </td>
       </tr>
