@@ -40,12 +40,11 @@ graph TD
     subgraph Phase4["Phase 4: Scientific Evaluation & MLOps Governance"]
         P3_ENS --> P4_EVAL["dag_model_evaluation<br/>(TimeSeriesSplit CV, Brier Score, ROC-AUC)"]
         P4_EVAL --> REG["model_registry.py<br/>(MinIO S3 Model Cards & Artifacts)"]
-        P4_EVAL --> PORT["portfolio_tracker.py<br/>(Paper Trading Portfolio & PnL)"]
     end
 
     subgraph Phase5["Phase 5: UI & Alerting"]
         PLAN & P4_EVAL --> TG["Telegram Alert System<br/>(Executive Reports, Charts & Failure Callbacks)"]
-        PLAN & REG & PORT --> DASH["Web Dashboard (Port 8050)<br/>(Interactive UI, Candles, Signals)"]
+        PLAN & REG --> DASH["Web Dashboard (Port 8050)<br/>(Interactive UI, Candles, Signals)"]
     end
 ```
 
@@ -139,7 +138,7 @@ airflow-stock/
 ├── docker-compose.yaml               # Docker Compose configuration (5 microservices)
 ├── requirements.txt                  # Python dependencies manifest
 ├── README.md                         # Project documentation
-├── dags/                             # 17 DAG Modules & Shared Utilities
+├── dags/                             # 16 DAG Modules & Shared Utilities
 │   ├── config_shared.py              # Centralized configuration: SECTOR_MAP, TICKERS_META, MACRO, CRON
 │   ├── alert_utils.py                # Telegram alerts, on-failure callbacks & safe retry logic
 │   ├── chart_utils.py                # Technical candlestick & indicator charting generation
@@ -147,7 +146,6 @@ airflow-stock/
 │   ├── hyperparameter_tuner.py       # 🧠 AutoML: Optuna Bayesian Optimization for hyperparameter tuning
 │   ├── model_registry.py             # Model artifact packaging & S3 Model Cards generation
 │   ├── model_evaluator.py            # Scientific backtesting: TimeSeriesSplit CV, ROC-AUC, Brier Score
-│   ├── portfolio_tracker.py          # Paper trading portfolio management & PnL tracking
 │   ├── dag_crawl_xgboost_stock_features.py   # Ingestion for 115+ technical, macro & fundamental features
 │   ├── dag_crawl_lstm_stock_features.py      # Ingestion for 15-year OHLCV time-series for PyTorch
 │   ├── dag_crawl_finbert_news.py             # Ingestion for multi-source financial RSS news & summaries
@@ -161,7 +159,7 @@ airflow-stock/
 │   ├── app.py                        # Python HTTP backend with MinIO S3 API integration
 │   └── static/                       # Responsive vanilla frontend (HTML5, CSS3, JavaScript)
 ├── minio_data/                       # Local volume mount for MinIO S3 storage
-│   └── stock-xgboost-data/           # Market datasets, model registry, evaluations, portfolio data
+│   └── stock-xgboost-data/           # Market datasets, model registry, evaluations
 └── logs/                             # Apache Airflow task execution logs
 ```
 
@@ -177,7 +175,6 @@ airflow-stock/
 - `models/`: Exported model artifacts (`.json`, `.pt`), scalers (`.joblib`), and MLOps Model Cards.
 - `quality/`: Automated Data Quality Gate audit logs, drift metrics, and validation reports.
 - `evaluation/`: Scientific backtesting reports, TimeSeriesSplit CV metrics, and correlation matrices.
-- `portfolio/`: Paper trading transaction ledger, position logs, and cumulative PnL metrics.
 
 ---
 

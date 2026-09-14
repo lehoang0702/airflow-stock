@@ -270,22 +270,6 @@ def compare_and_ensemble_task(**context):
             msg_lines.append(f"🔻 <b>{ticker}</b>{p_text}: {r['trang_thai_doi_chieu']} ➔ PP4: {r['pp4_tong_hop']}")
     else:
         msg_lines.append("🔴 <b>CẢNH BÁO BÁN:</b> Không có mã nào bị đồng thuận bán.")
-    # === CẬP NHẬT DANH MỤC PAPER TRADING T+5 ===
-    try:
-        from portfolio_tracker import update_virtual_portfolio, format_portfolio_telegram_section
-        port_summary = update_virtual_portfolio(
-            ensemble_df=df_compare,
-            current_prices=latest_prices,
-            s3_hook=s3_hook,
-            bucket_name=BUCKET_NAME,
-            today_str=today_str
-        )
-        port_text = format_portfolio_telegram_section(port_summary)
-        if port_text:
-            msg_lines.append("")
-            msg_lines.append(port_text)
-    except Exception as port_err:
-        logging.warning(f"⚠️ Không thể cập nhật Paper Trading: {port_err}")
 
     # Bắn tin nhắn HTML
     url_msg = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"

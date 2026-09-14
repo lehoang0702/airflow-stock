@@ -9,7 +9,6 @@ Python Web Server with S3 Integration (MinIO) serving the Interactive Web Dashbo
       /api/tickers     -> List of 20 tickers with metadata & sector
       /api/market      -> Latest Master Ensemble predictions & 4-method comparison
       /api/ticker      -> Historical price series, indicators, & news for a ticker
-      /api/portfolio   -> Virtual portfolio state, open positions, closed trades
       /api/quality     -> Data Quality validator reports
       /api/evaluation  -> MLOps Model Evaluation metrics & cross-validation
 """
@@ -18,6 +17,7 @@ import os
 import io
 import re
 import json
+import time
 import logging
 from http.server import HTTPServer, SimpleHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
@@ -56,11 +56,11 @@ TICKERS_META = {
     'LIN': {'name': 'Linde plc', 'sector': 'Vật liệu Công nghiệp'},
 }
 
-# Cache for heavy datasets
+# Cache for heavy datasets (TTL in seconds)
+CACHE_TTL = 60
 _CACHE = {
-    'market': (0, None),
-    'candles': (0, None),
-    'news': (0, None)
+    'market': {'time': 0, 'data': None},
+    'tickers': {}  # ticker -> {'time': 0, 'data': None}
 }
 
 
@@ -104,6 +104,15 @@ def get_latest_s3_key(s3, prefix: str):
         return None
 
 
+def read_s3_dataframe(s3, key: str) -> pd.DataFrame:
+    """Tự động đọc Parquet hoặc CSV từ MinIO S3."""
+    obj = s3.get_object(Bucket=BUCKET_NAME, Key=key)
+    raw = io.BytesIO(obj['Body'].read())
+    if key.endswith('.parquet'):
+        return pd.read_parquet(raw)
+    return pd.read_csv(raw)
+
+
 def extract_percentage(text: str, default: float = 50.0) -> float:
     """Trích xuất phần trăm từ chuỗi 'MUA (55.36%)'."""
     if not text or not isinstance(text, str):
@@ -118,7 +127,11 @@ def extract_percentage(text: str, default: float = 50.0) -> float:
 
 
 def get_market_data():
-    """Đọc dữ liệu bảng đối chiếu 4 phương pháp từ MinIO."""
+    """Đọc dữ liệu bảng đối chiếu 4 phương pháp từ MinIO (kèm cache 60s)."""
+    now_ts = time.time()
+    if _CACHE['market']['data'] is not None and (now_ts - _CACHE['market']['time']) < CACHE_TTL:
+        return _CACHE['market']['data']
+
     s3 = get_s3_client()
     today_str = datetime.now().strftime("%Y-%m-%d")
 
@@ -130,8 +143,7 @@ def get_market_data():
     price_key = get_latest_s3_key(s3, "lstm/lstm_stock_20tickers_10y_")
     if price_key:
         try:
-            obj = s3.get_object(Bucket=BUCKET_NAME, Key=price_key)
-            df_p = pd.read_csv(io.BytesIO(obj['Body'].read()))
+            df_p = read_s3_dataframe(s3, price_key)
             if 'Ticker' in df_p.columns and 'Close' in df_p.columns:
                 last_rows = df_p.sort_values(['Ticker', 'Date']).groupby('Ticker').last().reset_index()
                 latest_prices = dict(zip(last_rows['Ticker'], last_rows['Close']))
@@ -144,8 +156,7 @@ def get_market_data():
 
     if cmp_key:
         try:
-            obj = s3.get_object(Bucket=BUCKET_NAME, Key=cmp_key)
-            df_cmp = pd.read_csv(io.BytesIO(obj['Body'].read()))
+            df_cmp = read_s3_dataframe(s3, cmp_key)
 
             for _, r in df_cmp.iterrows():
                 ticker = str(r.get('ma_co_phieu', '')).strip()
@@ -206,7 +217,7 @@ def get_market_data():
     n_hold = len(predictions) - n_buy - n_sell
     mood = "BULLISH (TÍCH CỰC)" if n_buy > n_sell else ("BEARISH (TIÊU CỰC)" if n_sell > n_buy else "SIDEWAY (ĐI NGANG)")
 
-    return {
+    result = {
         "date": today_str,
         "market_mood": mood,
         "buy_count": n_buy,
@@ -214,6 +225,9 @@ def get_market_data():
         "hold_count": n_hold,
         "predictions": predictions
     }
+    _CACHE['market']['time'] = now_ts
+    _CACHE['market']['data'] = result
+    return result
 
 
 def _mock_market_data(today_str: str):
@@ -251,7 +265,12 @@ def _mock_market_data(today_str: str):
 
 
 def get_ticker_chart(ticker: str):
-    """Lấy dữ liệu nến OHLCV và tin tức gần nhất cho 1 mã từ MinIO."""
+    """Lấy dữ liệu nến OHLCV và tin tức gần nhất cho 1 mã từ MinIO (kèm cache 60s)."""
+    now_ts = time.time()
+    cached = _CACHE['tickers'].get(ticker)
+    if cached and (now_ts - cached['time']) < CACHE_TTL:
+        return cached['data']
+
     s3 = get_s3_client()
     candles = []
     news = []
@@ -261,8 +280,7 @@ def get_ticker_chart(ticker: str):
         price_key = get_latest_s3_key(s3, "lstm/lstm_stock_20tickers_10y_")
         if price_key:
             try:
-                obj = s3.get_object(Bucket=BUCKET_NAME, Key=price_key)
-                df = pd.read_csv(io.BytesIO(obj['Body'].read()))
+                df = read_s3_dataframe(s3, price_key)
                 if 'Ticker' in df.columns:
                     sub = df[df['Ticker'] == ticker].sort_values('Date').tail(50)
                     for _, r in sub.iterrows():
@@ -283,8 +301,7 @@ def get_ticker_chart(ticker: str):
         news_key = get_latest_s3_key(s3, "finbert/finbert_news_20tickers_")
         if news_key:
             try:
-                obj = s3.get_object(Bucket=BUCKET_NAME, Key=news_key)
-                df_n = pd.read_csv(io.BytesIO(obj['Body'].read()))
+                df_n = read_s3_dataframe(s3, news_key)
                 ticker_col = 'ma_co_phieu' if 'ma_co_phieu' in df_n.columns else 'ticker'
                 title_col = 'tieu_de' if 'tieu_de' in df_n.columns else 'headline'
                 if ticker_col in df_n.columns and title_col in df_n.columns:
@@ -298,43 +315,15 @@ def get_ticker_chart(ticker: str):
             except Exception as e:
                 logging.warning(f"Error fetching news for {ticker}: {e}")
 
-    return {
+    result = {
         "ticker": ticker,
         "name": TICKERS_META.get(ticker, {}).get('name', ticker),
         "sector": TICKERS_META.get(ticker, {}).get('sector', 'Công nghệ'),
         "candles": candles,
         "news": news
     }
-
-
-def get_portfolio_data():
-    """Đọc trạng thái Paper Trading từ MinIO."""
-    s3 = get_s3_client()
-    default_state = {
-        "initial_capital": 100000.0,
-        "cash": 100000.0,
-        "stock_market_value": 0.0,
-        "portfolio_value": 100000.0,
-        "total_return_pct": 0.0,
-        "total_realized_pnl": 0.0,
-        "total_trades": 0,
-        "win_trades": 0,
-        "win_rate_pct": 0.0,
-        "profit_factor": 1.0,
-        "open_positions": [],
-        "closed_trades": [],
-        "last_updated": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    }
-
-    if s3:
-        try:
-            obj = s3.get_object(Bucket=BUCKET_NAME, Key="portfolio/portfolio_state.json")
-            data = json.loads(obj['Body'].read().decode('utf-8'))
-            return data
-        except Exception:
-            pass
-
-    return default_state
+    _CACHE['tickers'][ticker] = {'time': now_ts, 'data': result}
+    return result
 
 
 def get_quality_data():
@@ -555,8 +544,7 @@ def get_evaluation_data():
     try:
         cmp_key = get_latest_s3_key(s3, "evaluation/comparison/eval_comparison_")
         if cmp_key:
-            obj = s3.get_object(Bucket=BUCKET_NAME, Key=cmp_key)
-            df_cmp = pd.read_csv(io.BytesIO(obj['Body'].read()))
+            df_cmp = read_s3_dataframe(s3, cmp_key)
             models = []
             folds = []
             finbert_info = {}
@@ -733,8 +721,6 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             elif path == "/api/ticker":
                 symbol = query.get("symbol", ["AAPL"])[0].upper()
                 resp = get_ticker_chart(symbol)
-            elif path == "/api/portfolio":
-                resp = get_portfolio_data()
             elif path == "/api/quality":
                 resp = get_quality_data()
             elif path == "/api/evaluation":

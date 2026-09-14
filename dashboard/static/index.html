@@ -3,11 +3,11 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Hệ Thống Định Lượng AI | Phân Tích Kỹ Thuật 20 Mã Cổ Phiếu</title>
+  <title>Quantum AI Stock Terminal | Nền Tảng Dự Báo Định Lượng Đa Phương Thức</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="style.css?v=5.0">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css?v=6.0">
 </head>
 <body>
   <!-- Header / Navigation Bar -->
@@ -16,68 +16,169 @@
       <div class="logo-box">
         <span class="logo-icon">⚡</span>
         <div class="logo-text">
-          <h1>HỆ THỐNG ĐỊNH LƯỢNG AI</h1>
-          <span class="logo-sub">Nền Tảng Phân Tích Cổ Phiếu Đa Phương Thức &bull; Tổng Hợp 4 Mô Hình</span>
+          <h1>QUANTUM AI STOCK TERMINAL</h1>
+          <span class="logo-sub">Định Lượng Đa Phương Thức &bull; XGBoost + LSTM + FinBERT Master Ensemble</span>
         </div>
       </div>
       <div class="status-pill">
         <span class="pulse-dot"></span>
-        <span class="status-text">HỆ THỐNG TRỰC TUYẾN</span>
+        <span class="status-text">TRỰC TUYẾN</span>
       </div>
     </div>
 
-    <!-- Quick Market Bar -->
+    <!-- Quick Market Overview Bar -->
     <div class="header-metrics">
       <div class="metric-chip">
         <span class="metric-label">XU HƯỚNG TT:</span>
         <span class="metric-val" id="header-market-mood">ĐANG TẢI...</span>
       </div>
+      <div class="metric-chip highlight-chip">
+        <span class="metric-label">TỔNG QUAN TÍN HIỆU:</span>
+        <span class="metric-val" id="header-market-summary">
+          <span class="badge-count green" id="summary-buy-count">0 MUA</span>
+          <span class="badge-count yellow" id="summary-hold-count">0 CHỜ</span>
+          <span class="badge-count red" id="summary-sell-count">0 BÁN</span>
+        </span>
+      </div>
       <div class="metric-chip">
         <span class="metric-label">MÃ ĐANG CHỌN:</span>
         <span class="metric-val highlight" id="header-active-ticker">AAPL</span>
+        <span class="ticker-signal-chip" id="header-active-signal">ĐANG PHÂN TÍCH</span>
       </div>
-      <div class="metric-chip">
-        <span class="metric-label">TÍN HIỆU TỔNG HỢP:</span>
-        <span class="metric-val success" id="header-active-signal">ĐANG PHÂN TÍCH</span>
-      </div>
-      <span class="auto-refresh-badge" id="auto-refresh-badge" title="Nhấp để chuyển chu kỳ tự động làm mới">⏱️ Tự động: 5p</span>
+      <span class="auto-refresh-badge" id="auto-refresh-badge" title="Chu kỳ tự động làm mới">⏱️ 5p</span>
       <button class="btn-refresh" id="btn-refresh" title="Làm mới dữ liệu ngay lập tức">
         <span class="refresh-icon">🔄</span> Làm mới
       </button>
     </div>
   </header>
 
-  <!-- Sub-Header Quick Navigation Bar -->
+  <!-- Navigation Tab Bar -->
   <div class="sub-header-nav">
-    <div class="nav-pills">
-      <a href="#tab-charts" class="nav-pill-btn active"><span class="pill-icon">📊</span> Biểu Đồ & Tín Hiệu</a>
-      <a href="#section-quality" class="nav-pill-btn"><span class="pill-icon">🛡️</span> Kiểm Định Dữ Liệu Đầu Vào</a>
-      <a href="#section-evaluation" class="nav-pill-btn"><span class="pill-icon">🔬</span> Đánh Giá Năng Lực 4 Mô Hình</a>
+    <div class="nav-pills" id="main-nav-pills">
+      <button class="nav-pill-btn active" data-tab="tab-screener">
+        <span class="pill-icon">🎯</span> Bảng 20 Cổ Phiếu & Tín Hiệu Mua/Bán
+      </button>
+      <button class="nav-pill-btn" data-tab="tab-charts">
+        <span class="pill-icon">📈</span> Biểu Đồ Nến Kỹ Thuật & Tin Tức
+      </button>
+      <button class="nav-pill-btn" data-tab="tab-audit">
+        <span class="pill-icon">🛡️</span> Thẩm Định Thuật Toán & Kiểm Định Dữ Liệu
+      </button>
     </div>
     <div class="system-sync-time">
-      <span>Đồng bộ gần nhất: </span><strong id="sync-timestamp">Đang cập nhật...</strong>
+      <span>Đồng bộ dữ liệu: </span><strong id="sync-timestamp">Đang cập nhật...</strong>
     </div>
   </div>
 
   <!-- Main Content Container -->
   <main class="app-content">
 
-    <!-- TAB 2: INTERACTIVE CANDLESTICK CHART -->
-    <section id="tab-charts" class="tab-panel active">
-      <!-- Ticker Filter Pills -->
+    <!-- ================================================================= -->
+    <!-- TAB 1: SMART MARKET SCREENER (BẢNG 20 MÃ CỔ PHIẾU THÔNG MINH)   -->
+    <!-- ================================================================= -->
+    <section id="tab-screener" class="tab-panel active">
+      <!-- Top Opportunity Spotlight Banner -->
+      <div class="screener-banner-card card mb-3">
+        <div class="banner-icon-side">
+          <div class="spotlight-circle">🚀</div>
+        </div>
+        <div class="banner-info-side">
+          <div class="banner-tag">⭐ CƠ HỘI ĐẦU TƯ HÀNG ĐẦU HÔM NAY (TOP CONVICTION PICKS)</div>
+          <h2 class="banner-title">Các Mã Cổ Phiếu Đạt Tín Hiệu Mua Đồng Thuận 4 Mô Hình</h2>
+          <p class="banner-desc">
+            Hệ thống Master Ensemble tự động kết hợp 115+ chỉ báo toán học, chuỗi nến học sâu LSTM và phân tích cảm xúc tin tức tài chính FinBERT để đưa ra các điểm vào lệnh (Entry), mục tiêu lợi nhuận (Take Profit) và ngưỡng bảo toàn vốn (Stop Loss) chuẩn xác.
+          </p>
+          <div class="top-picks-container" id="top-picks-container">
+            <!-- Populated by JS with Top BUY tickers -->
+            <div class="empty-top-picks">Đang phân tích các cơ hội sáng giá nhất...</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Controls & Filter Toolbar -->
+      <div class="screener-controls-card card mb-3">
+        <div class="controls-row">
+          <!-- Search input -->
+          <div class="search-box">
+            <span class="search-icon">🔍</span>
+            <input type="text" id="screener-search-input" placeholder="Tìm kiếm theo mã (AAPL, NVDA...) hoặc tên doanh nghiệp..." />
+            <button class="search-clear-btn" id="search-clear-btn" title="Xóa tìm kiếm">&times;</button>
+          </div>
+
+          <!-- Quick Signal Filter Chips -->
+          <div class="filter-chips-group" id="signal-filter-group">
+            <span class="filter-label">LỌC TÍN HIỆU:</span>
+            <button class="filter-chip active" data-filter="all">Tất Cả (20)</button>
+            <button class="filter-chip filter-buy" data-filter="buy">🟢 Chỉ Xem Mã MUA</button>
+            <button class="filter-chip filter-hold" data-filter="hold">🟡 Đứng Ngoài / Theo Dõi</button>
+            <button class="filter-chip filter-sell" data-filter="sell">🔴 Cảnh Báo BÁN</button>
+          </div>
+        </div>
+
+        <!-- Sector Filter Chips -->
+        <div class="sector-chips-row" id="sector-filter-group">
+          <span class="filter-label">NHÓM NGÀNH:</span>
+          <button class="sector-chip active" data-sector="all">Tất Cả Ngành</button>
+          <button class="sector-chip" data-sector="Công nghệ">💻 Công Nghệ</button>
+          <button class="sector-chip" data-sector="Tài chính">🏦 Tài Chính</button>
+          <button class="sector-chip" data-sector="Y tế">🏥 Y Tế</button>
+          <button class="sector-chip" data-sector="Hàng tiêu dùng">🛒 Tiêu Dùng</button>
+          <button class="sector-chip" data-sector="Năng lượng">⚡ Năng Lượng & Tiện Ích</button>
+          <button class="sector-chip" data-sector="Công nghiệp">🏭 Công Nghiệp</button>
+        </div>
+      </div>
+
+      <!-- Main Screener Data Table -->
+      <div class="card screener-table-card">
+        <div class="table-responsive">
+          <table class="screener-table" id="screener-table">
+            <thead>
+              <tr>
+                <th class="th-ticker">MÃ & TÊN CÔNG TY</th>
+                <th class="th-sector">NHÓM NGÀNH</th>
+                <th class="th-price">GIÁ HIỆN TẠI</th>
+                <th class="th-signal">KHUYẾN NGHỊ AI</th>
+                <th class="th-confidence">ĐỒNG THUẬN 4 MODEL</th>
+                <th class="th-entry">VÙNG MUA (ENTRY)</th>
+                <th class="th-tp">CHỐT LỜI (TARGET)</th>
+                <th class="th-sl">CẮT LỖ (STOP LOSS)</th>
+                <th class="th-rr">TỶ LỆ R:R</th>
+                <th class="th-action">THAO TÁC</th>
+              </tr>
+            </thead>
+            <tbody id="screener-table-body">
+              <!-- Dynamically populated by app.js -->
+              <tr>
+                <td colspan="10" class="table-loading">Đang tải dữ liệu phân tích 20 mã cổ phiếu từ MinIO S3...</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="table-footer-info">
+          <span>💡 <strong>Mẹo:</strong> Nhấp vào bất kỳ hàng cổ phiếu nào ở trên để mở ngay biểu đồ nến kỹ thuật và tin tức chi tiết.</span>
+          <span id="screener-records-count">Hiển thị 20/20 cổ phiếu</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================================================================= -->
+    <!-- TAB 2: INTERACTIVE CANDLESTICK CHART & DETAILED ANALYSIS          -->
+    <!-- ================================================================= -->
+    <section id="tab-charts" class="tab-panel">
+      <!-- Quick Ticker Switcher Pills -->
       <div class="ticker-selector-container">
-        <span class="selector-label">CHỌN MÃ CP:</span>
+        <span class="selector-label">CHỌN NHANH MÃ:</span>
         <div class="ticker-pills" id="ticker-pills">
           <!-- Populated by JS -->
         </div>
       </div>
 
-      <!-- Chart Grid -->
+      <!-- Chart Layout Grid -->
       <div class="chart-layout-grid">
         <!-- Main Candlestick Chart Card -->
         <div class="card chart-main-card">
           <div class="chart-header">
-            <div>
+            <div class="chart-header-info">
               <div class="chart-title-row">
                 <h2 class="ticker-big-name" id="chart-ticker-name">AAPL</h2>
                 <span class="ticker-full-name" id="chart-company-name">Apple Inc.</span>
@@ -88,30 +189,52 @@
                 <span class="price-badge" id="chart-signal-badge">ĐANG TẢI</span>
               </div>
             </div>
+
+            <!-- Trading Plan Highlight Card inside Chart Header -->
+            <div class="chart-plan-summary" id="chart-plan-summary">
+              <div class="plan-mini-item">
+                <span class="p-label">VÙNG VÀO (ENTRY):</span>
+                <strong class="p-val" id="chart-plan-entry">$0.00</strong>
+              </div>
+              <div class="plan-mini-item">
+                <span class="p-label">MỤC TIÊU (TP):</span>
+                <strong class="p-val text-success" id="chart-plan-tp">$0.00 (+3.5%)</strong>
+              </div>
+              <div class="plan-mini-item">
+                <span class="p-label">CẮT LỖ (SL):</span>
+                <strong class="p-val text-danger" id="chart-plan-sl">$0.00 (-2.0%)</strong>
+              </div>
+              <div class="plan-mini-item">
+                <span class="p-label">R:R:</span>
+                <strong class="p-val" id="chart-plan-rr">1:2</strong>
+              </div>
+            </div>
           </div>
 
-          <!-- View / Model Switcher Toolbar -->
+          <!-- View Switcher Toolbar -->
           <div class="chart-view-toolbar">
             <div class="view-buttons" id="view-buttons">
-              <button class="view-btn active" data-view="ensemble">👑 Tổng Hợp (Ensemble Master)</button>
-              <button class="view-btn" data-view="xgboost">🌲 XGBoost</button>
-              <button class="view-btn" data-view="lstm">🧠 LSTM</button>
-              <button class="view-btn" data-view="finbert">📰 FinBERT</button>
-              <button class="view-btn" data-view="candlestick">🕯️ Nến Nhật OHLCV</button>
+              <button class="view-btn active" data-view="candlestick">🕯️ Nến Nhật Tương Tác & MA20</button>
+              <button class="view-btn" data-view="ensemble">👑 Ảnh Báo Cáo Tổng Hợp</button>
+              <button class="view-btn" data-view="xgboost">🌲 XGBoost Chart</button>
+              <button class="view-btn" data-view="lstm">🧠 LSTM Chart</button>
+              <button class="view-btn" data-view="finbert">📰 FinBERT Chart</button>
             </div>
-            <div class="view-actions">
+            <div class="view-actions hidden" id="view-actions-block">
               <button class="btn-action" id="btn-zoom-img" title="Phóng to ảnh báo cáo">🔍 Phóng to</button>
               <a class="btn-action" id="btn-download-img" href="/api/chart-image?symbol=AAPL&model=ensemble" download="AAPL_report.png" title="Tải ảnh gốc HD">⬇️ Tải ảnh HD</a>
             </div>
           </div>
 
-          <!-- Report Image View (Dual-Panel Telegram Chart) -->
-          <div class="report-img-container" id="report-img-container">
-            <img id="report-chart-img" src="/api/chart-image?symbol=AAPL&model=ensemble" alt="Báo cáo phân tích Telegram" class="report-chart-img" />
-          </div>
-
-          <!-- Interactive Candlestick SVG Container (Initially hidden) -->
-          <div class="candlestick-section hidden" id="candlestick-section">
+          <!-- Interactive Candlestick SVG Container (Primary View) -->
+          <div class="candlestick-section" id="candlestick-section">
+            <div class="chart-legend-row">
+              <span class="legend-item"><span class="legend-dot green"></span> Nến Tăng</span>
+              <span class="legend-item"><span class="legend-dot red"></span> Nến Giảm</span>
+              <span class="legend-item"><span class="legend-line orange"></span> Đường MA20 (Trung Bình 20 Phiên)</span>
+              <span class="legend-item"><span class="legend-line dashed-green"></span> Mức Chốt Lời (Take Profit)</span>
+              <span class="legend-item"><span class="legend-line dashed-red"></span> Mức Cắt Lỗ (Stop Loss)</span>
+            </div>
             <div class="chart-viewport" id="chart-viewport">
               <svg id="candlestick-svg" width="100%" height="340"></svg>
               <div id="chart-tooltip" class="chart-tooltip hidden"></div>
@@ -120,23 +243,38 @@
             <!-- RSI Subchart -->
             <div class="subchart-container">
               <div class="subchart-header">
-                <span>RSI (14) - Động lượng thị trường</span>
+                <span>RSI (14) - Chỉ Số Sức Mạnh Tương Đối</span>
                 <span id="rsi-latest-val" class="rsi-val">RSI: --</span>
               </div>
-              <svg id="rsi-svg" width="100%" height="80"></svg>
+              <svg id="rsi-svg" width="100%" height="75"></svg>
             </div>
+          </div>
+
+          <!-- Report Image View (Secondary View - Hidden by default) -->
+          <div class="report-img-container hidden" id="report-img-container">
+            <img id="report-chart-img" src="/api/chart-image?symbol=AAPL&model=ensemble" alt="Báo cáo phân tích Telegram" class="report-chart-img" />
           </div>
         </div>
 
-        <!-- Sidebar: Model Gauges & News -->
+        <!-- Sidebar: 4 Model Probability Breakdown & News -->
         <div class="chart-side-col">
           <!-- 4-Model Probability Gauge Breakdown -->
           <div class="card gauge-card">
-            <h3 class="side-card-title">Đối Chiếu 4 Mô Hình Định Lượng</h3>
+            <h3 class="side-card-title">Đối Chiếu 4 Mô Hình Cho <span id="side-ticker-symbol">AAPL</span></h3>
             <div class="gauge-list">
+              <div class="gauge-item highlight-gauge">
+                <div class="gauge-labels">
+                  <span>👑 Mô Hình Tổng Hợp (Master Ensemble)</span>
+                  <span id="side-ensemble-val" class="gauge-pct bold">--%</span>
+                </div>
+                <div class="gauge-bar-bg">
+                  <div class="gauge-bar-fill purple" id="side-ensemble-bar" style="width: 50%;"></div>
+                </div>
+              </div>
+
               <div class="gauge-item">
                 <div class="gauge-labels">
-                  <span>🌲 PP1: XGBoost (Dữ liệu bảng)</span>
+                  <span>🌲 PP1: XGBoost (115+ Đặc Trưng Toán Học)</span>
                   <span id="side-xgb-val" class="gauge-pct">--%</span>
                 </div>
                 <div class="gauge-bar-bg">
@@ -146,7 +284,7 @@
 
               <div class="gauge-item">
                 <div class="gauge-labels">
-                  <span>🧠 PP2: LSTM (Học sâu chuỗi giá)</span>
+                  <span>🧠 PP2: LSTM (Chuỗi Nến Học Sâu 15 Năm)</span>
                   <span id="side-lstm-val" class="gauge-pct">--%</span>
                 </div>
                 <div class="gauge-bar-bg">
@@ -156,21 +294,11 @@
 
               <div class="gauge-item">
                 <div class="gauge-labels">
-                  <span>📰 PP3: FinBERT (Sắc thái tin tức)</span>
+                  <span>📰 PP3: FinBERT (Cảm Xúc Tin Tức Báo Chí)</span>
                   <span id="side-bert-val" class="gauge-pct">--%</span>
                 </div>
                 <div class="gauge-bar-bg">
                   <div class="gauge-bar-fill yellow" id="side-bert-bar" style="width: 50%;"></div>
-                </div>
-              </div>
-
-              <div class="gauge-item highlight-gauge">
-                <div class="gauge-labels">
-                  <span>👑 PP4: Mô Hình Tổng Hợp (Đa phương thức)</span>
-                  <span id="side-ensemble-val" class="gauge-pct bold">--%</span>
-                </div>
-                <div class="gauge-bar-bg">
-                  <div class="gauge-bar-fill purple" id="side-ensemble-bar" style="width: 50%;"></div>
                 </div>
               </div>
             </div>
@@ -178,7 +306,7 @@
 
           <!-- FinBERT News Feed -->
           <div class="card news-card">
-            <h3 class="side-card-title">Tin Tức Tài Chính Liên Quan (FinBERT)</h3>
+            <h3 class="side-card-title">Tin Tức Tài Chính Liên Quan (FinBERT NLP)</h3>
             <div class="news-list" id="side-news-list">
               <div class="empty-news">Đang tải tin tức...</div>
             </div>
@@ -187,14 +315,17 @@
       </div>
     </section>
 
-    <!-- SECTION: DATA QUALITY GATE (KIỂM ĐỊNH CHẤT LƯỢNG ĐẦU VÀO) -->
-    <section id="section-quality" class="dashboard-section">
-      <div class="section-header-box">
+    <!-- ================================================================= -->
+    <!-- TAB 3: AI AUDITING, EVALUATION & DATA QUALITY                      -->
+    <!-- ================================================================= -->
+    <section id="tab-audit" class="tab-panel">
+      <!-- Section 1: Data Quality Gate -->
+      <div class="section-header-box mb-3">
         <div class="section-title-wrap">
           <span class="section-icon-badge">🛡️</span>
           <div>
             <h2 class="section-title">KIỂM ĐỊNH CHẤT LƯỢNG DỮ LIỆU ĐẦU VÀO</h2>
-            <p class="section-subtitle">Chốt chặn tự động xác nhận dữ liệu sạch, liên tục và an toàn 100% trước khi nạp vào mô hình AI</p>
+            <p class="section-subtitle">Chốt chặn tự động bảo đảm dữ liệu sạch, toàn vẹn và không rò rỉ trước khi nạp vào AI</p>
           </div>
         </div>
         <div class="quality-status-badge" id="quality-overall-badge">
@@ -203,7 +334,7 @@
         </div>
       </div>
 
-      <!-- Health Overview Hero Banner -->
+      <!-- Health Banner -->
       <div class="quality-hero-banner card mb-3">
         <div class="hero-score-col">
           <div class="health-score-ring">
@@ -227,7 +358,7 @@
       </div>
 
       <!-- 4 Quick Intuitive Metric Cards -->
-      <div class="quality-kpi-grid">
+      <div class="quality-kpi-grid mb-3">
         <div class="card quality-kpi-card">
           <div class="kpi-icon-header">
             <span class="kpi-symbol">🎯</span>
@@ -258,7 +389,7 @@
           <span class="kpi-card-label">TỶ LỆ DỮ LIỆU SẠCH</span>
           <span class="kpi-card-value text-success" id="qa-clean-pct">98.34%</span>
           <div class="kpi-progress-bar"><div class="kpi-progress-fill green" style="width: 98.34%;"></div></div>
-          <span class="kpi-card-sub">Khuyết thiếu chỉ 1.66% (sâu dưới ngưỡng cảnh báo &lt; 5%)</span>
+          <span class="kpi-card-sub">Khuyết thiếu chỉ 1.66% (&lt; 5% ngưỡng an toàn)</span>
         </div>
 
         <div class="card quality-kpi-card">
@@ -273,99 +404,13 @@
         </div>
       </div>
 
-      <!-- Visual 5-Step Automated Validation Pipeline -->
-      <div class="card quality-card mb-4">
-        <h3 class="card-inner-title">🚀 Quy Trình 5 Tiêu Chuẩn Vàng Kiểm Định Dữ Liệu Tự Động</h3>
-        <p class="card-inner-desc">Trước khi dữ liệu được nạp vào mô hình học máy, hệ thống tự động kiểm duyệt qua 5 chốt chặn độc lập:</p>
-        
-        <div class="qa-steps-flow">
-          <div class="qa-step-box passed">
-            <div class="step-num">1</div>
-            <div class="step-icon">🕯️</div>
-            <div class="step-content">
-              <h4 class="step-title">Logic Nến OHLCV</h4>
-              <p class="step-desc">Đỉnh &ge; Đáy, Đóng/Mở chuẩn xác</p>
-              <span class="step-badge">✓ ĐẠT 100%</span>
-            </div>
-          </div>
-
-          <div class="qa-step-box passed">
-            <div class="step-num">2</div>
-            <div class="step-icon">💰</div>
-            <div class="step-content">
-              <h4 class="step-title">Giá & Khối Lượng</h4>
-              <p class="step-desc">Giá &gt; $0, Volume &gt; 0, không có giá ảo</p>
-              <span class="step-badge">✓ ĐẠT 100%</span>
-            </div>
-          </div>
-
-          <div class="qa-step-box passed">
-            <div class="step-num">3</div>
-            <div class="step-icon">📈</div>
-            <div class="step-content">
-              <h4 class="step-title">Độ Dài Chuỗi</h4>
-              <p class="step-desc">Tối thiểu &ge; 30 phiên liên tục không đứt đoạn</p>
-              <span class="step-badge">✓ ĐẠT 100%</span>
-            </div>
-          </div>
-
-          <div class="qa-step-box passed">
-            <div class="step-num">4</div>
-            <div class="step-icon">🌐</div>
-            <div class="step-content">
-              <h4 class="step-title">Bao Phủ Thị Trường</h4>
-              <p class="step-desc">Đầy đủ 20/20 mã, không sót cổ phiếu nào</p>
-              <span class="step-badge">✓ ĐẠT 100%</span>
-            </div>
-          </div>
-
-          <div class="qa-step-box passed">
-            <div class="step-num">5</div>
-            <div class="step-icon">🛡️</div>
-            <div class="step-content">
-              <h4 class="step-title">Xử Lý Khuyết Thiếu</h4>
-              <p class="step-desc">Tự động xử lý độ trễ các đường MA dài hạn</p>
-              <span class="step-badge">✓ AN TOÀN</span>
-            </div>
-          </div>
-        </div>
-
-        <div class="qa-warnings-box" id="qa-warnings-box">
-          <span class="warning-tag">💡 Giải thích dễ hiểu:</span>
-          <span id="qa-warning-msg">Các đường trung bình MA dài hạn (MA100, MA200) có độ trễ tự nhiên ở các phiên đầu chu kỳ 5 năm trước và đã được thuật toán MLOps xử lý an toàn, không ảnh hưởng đến tín hiệu giao dịch hiện tại.</span>
-        </div>
-
-        <!-- Collapsible Details for Technical Audit -->
-        <details class="qa-details-collapse mt-3">
-          <summary class="btn-toggle-details">📋 Xem Bảng Thống Kê Dữ Liệu Chi Tiết (XGBoost & LSTM)</summary>
-          <div class="qa-table-wrap mt-3">
-            <table class="modern-table" id="qa-datasets-table">
-              <thead>
-                <tr>
-                  <th>Tập Dữ Liệu</th>
-                  <th>Số Dòng Thực Tế</th>
-                  <th>Số Biến Kỹ Thuật</th>
-                  <th>Độ Bao Phủ Cổ Phiếu</th>
-                  <th>Trạng Thái Kiểm Định</th>
-                </tr>
-              </thead>
-              <tbody id="qa-datasets-body">
-                <!-- Dynamically populated -->
-              </tbody>
-            </table>
-          </div>
-        </details>
-      </div>
-    </section>
-
-    <!-- SECTION: MLOPS MODEL EVALUATION (ĐÁNH GIÁ NĂNG LỰC MÔ HÌNH) -->
-    <section id="section-evaluation" class="dashboard-section">
-      <div class="section-header-box">
+      <!-- Section 2: Model Evaluation Benchmark Leaderboard -->
+      <div class="section-header-box mb-3 mt-4">
         <div class="section-title-wrap">
           <span class="section-icon-badge">🔬</span>
           <div>
-            <h2 class="section-title">ĐÁNH GIÁ NĂNG LỰC 4 MÔ HÌNH AI</h2>
-            <p class="section-subtitle">Xếp hạng thực nghiệm khoa học, so sánh tỷ lệ dự báo đúng và năng lực phòng vệ vốn của từng phương pháp</p>
+            <h2 class="section-title">ĐÁNH GIÁ NĂNG LỰC 4 MÔ HÌNH HỌC MÁY</h2>
+            <p class="section-subtitle">Xếp hạng thực nghiệm khoa học, so sánh tỷ lệ dự báo chính xác và năng lực phòng vệ vốn</p>
           </div>
         </div>
         <div class="eval-date-badge">
@@ -392,7 +437,7 @@
             <span class="winrate-sub">+6.8% vượt trội so với đoán mò thị trường 50/50</span>
           </div>
           <p class="model-summary-desc">
-            Hợp nhất 3 nguồn trí tuệ: <strong>85+ chỉ báo kỹ thuật</strong> + <strong>chuỗi nến học sâu</strong> + <strong>sắc thái tin tức</strong>. Tự động triệt tiêu tín hiệu giả và tránh 70% bẫy đu đỉnh (Bull-trap).
+            Hợp nhất 3 nguồn trí tuệ: <strong>115+ chỉ báo kỹ thuật</strong> + <strong>chuỗi nến học sâu</strong> + <strong>sắc thái tin tức</strong>. Tự động triệt tiêu tín hiệu giả và tránh 70% bẫy đu đỉnh (Bull-trap).
           </p>
           <div class="model-badges-footer">
             <span class="m-badge">🎯 Điểm cân bằng F1: 0.568</span>
@@ -431,7 +476,7 @@
           <div class="rank-badge bronze">📰 HẠNG 3 &bull; ĐÓN ĐẦU TIN TỨC</div>
           <div class="model-card-head">
             <h3 class="model-name">Mô Hình FinBERT</h3>
-            <span class="model-type-tag">Xử Lý Ngôn Ngữ Tự Nhiên & Cảm Xúc Tin Tức Tài Chính</span>
+            <span class="model-type-tag">Xử Lý Ngôn Ngữ Tự Nhiên & Cảm Xúc Tin Tức</span>
           </div>
           <div class="model-winrate-box">
             <span class="winrate-label">ĐỘ CHÍNH XÁC CẢM XÚC</span>
@@ -477,51 +522,12 @@
         </div>
       </div>
 
-      <!-- Real-world Trading Impact Overview (2 Highlight Panels) -->
-      <div class="trading-impact-grid mb-4">
-        <div class="card impact-card positive">
-          <div class="impact-head">
-            <span class="impact-icon">🎯</span>
-            <div class="impact-text-group">
-              <h4 class="impact-title">Hiệu Quả Ra Quyết Định MUA (Tấn Công Sinh Lời)</h4>
-              <p class="impact-subtitle">Khả năng chọn lọc cổ phiếu tăng giá thực tế khi hệ thống báo MUA</p>
-            </div>
-            <span class="impact-val text-success">57.1%</span>
-          </div>
-          <div class="impact-meter-bar">
-            <div class="impact-meter-fill green" style="width: 57.1%;"></div>
-          </div>
-          <p class="impact-detail">
-            Trong 100 lần hệ thống đưa ra khuyến nghị MUA, có <strong>57 lần giá tăng thực tế</strong> vượt kỳ vọng T+5. Lợi thế định lượng +7.1% mang lại tỷ lệ Risk:Reward tối ưu 1:2.
-          </p>
-        </div>
-
-        <div class="card impact-card defensive">
-          <div class="impact-head">
-            <span class="impact-icon">🛡️</span>
-            <div class="impact-text-group">
-              <h4 class="impact-title">Hiệu Quả Bảo Toàn Vốn (Phòng Vệ Tránh Đu Đỉnh)</h4>
-              <p class="impact-subtitle">Khả năng cảnh báo ĐỨNG NGOÀI / BÁN để tránh thua lỗ</p>
-            </div>
-            <span class="impact-val text-purple">59.4%</span>
-          </div>
-          <div class="impact-meter-bar">
-            <div class="impact-meter-fill purple" style="width: 59.4%;"></div>
-          </div>
-          <p class="impact-detail">
-            Hệ thống nhận diện chuẩn xác gần <strong>60% các phiên thị trường đảo chiều giảm</strong>, giúp nhà đầu tư kiên quyết đứng ngoài và bảo vệ an toàn danh mục vốn.
-          </p>
-        </div>
-      </div>
-
-      <!-- Advanced Technical Statistics (Collapsible for Academics / Instructors) -->
-      <div class="card eval-card">
+      <!-- Advanced Technical Statistics (Collapsible) -->
+      <div class="card eval-card mb-4">
         <details class="eval-details-collapse">
-          <summary class="btn-toggle-details">📊 Xem Bảng Thống Kê Học Máy Chuyên Sâu (Độ Chính Xác, F1, Kiểm Định Chéo, Ma Trận Nhầm Lẫn)</summary>
-          
-          <div class="advanced-eval-content mt-4">
-            <!-- Benchmark Table -->
-            <h4 class="sub-title-eval">1. Bảng So Sánh Chỉ Số Khoa Học (4 Mô Hình)</h4>
+          <summary class="btn-toggle-details">📋 Xem Chi Tiết Kiểm Định Khoa Học (F1, Ma Trận Nhầm Lẫn, 5-Fold TimeSeriesSplit)</summary>
+          <div class="advanced-eval-content mt-3">
+            <h4 class="sub-title-eval">Bảng So Sánh Chỉ Số Khoa Học (4 Mô Hình)</h4>
             <div class="qa-table-wrap mb-4">
               <table class="modern-table benchmark-table" id="eval-benchmark-table">
                 <thead>
@@ -529,11 +535,10 @@
                     <th>Mô Hình</th>
                     <th>Độ Chính Xác (Accuracy)</th>
                     <th>Chỉ Số Phân Tách (ROC-AUC)</th>
-                    <th>Độ Chuẩn Xác (Precision Tăng/Giảm)</th>
-                    <th>Độ Bao Phủ (Recall Tăng/Giảm)</th>
-                    <th>Điểm Cân Bằng F1 (Tăng/Giảm)</th>
+                    <th>Precision Tăng/Giảm</th>
+                    <th>Recall Tăng/Giảm</th>
+                    <th>Điểm F1 Tăng/Giảm</th>
                     <th>Mẫu Thử Nghiệm</th>
-                    <th>Đánh Giá Kỹ Thuật</th>
                   </tr>
                 </thead>
                 <tbody id="eval-benchmark-body">
@@ -542,40 +547,36 @@
               </table>
             </div>
 
-            <!-- 2-Col Grid: Confusion Matrix & 5-Fold CV -->
+            <!-- Confusion Matrix & 5-Fold CV -->
             <div class="eval-deep-grid">
-              <!-- Confusion Matrix -->
               <div class="card sub-card">
-                <h4 class="card-inner-title">Ma Trận Nhầm Lẫn Dự Báo (Confusion Matrix)</h4>
-                <p class="card-inner-desc">Đối chiếu kết quả dự báo và diễn biến thực tế của 12,711 phiên:</p>
+                <h4 class="card-inner-title">Ma Trận Nhầm Lẫn (Confusion Matrix - 12,711 Phiên)</h4>
                 <div class="confusion-matrix-grid">
                   <div class="cm-cell cm-tp">
-                    <span class="cm-label">Đoán Tăng Đúng (True Positive)</span>
+                    <span class="cm-label">Đoán Tăng Đúng (TP)</span>
                     <span class="cm-val" id="cm-tp-val">3,062</span>
-                    <span class="cm-desc">Dự báo TĂNG &rarr; Thực tế TĂNG (Thắng lợi)</span>
+                    <span class="cm-desc">Dự báo TĂNG &rarr; Thực tế TĂNG</span>
                   </div>
                   <div class="cm-cell cm-fp">
-                    <span class="cm-label">Bẫy Đu Đỉnh (False Positive)</span>
+                    <span class="cm-label">Bẫy Đu Đỉnh (FP)</span>
                     <span class="cm-val" id="cm-fp-val">3,057</span>
-                    <span class="cm-desc">Bẫy Bull-trap (Dự báo Tăng nhưng Giảm)</span>
+                    <span class="cm-desc">Bẫy Bull-trap</span>
                   </div>
                   <div class="cm-cell cm-fn">
-                    <span class="cm-label">Bỏ Lỡ Sóng (False Negative)</span>
+                    <span class="cm-label">Bỏ Lỡ Sóng (FN)</span>
                     <span class="cm-val" id="cm-fn-val">3,294</span>
-                    <span class="cm-desc">Bỏ lỡ cơ hội (Dự báo Giảm nhưng Tăng)</span>
+                    <span class="cm-desc">Dự báo Giảm nhưng Tăng</span>
                   </div>
                   <div class="cm-cell cm-tn">
-                    <span class="cm-label">Bảo Vệ Vốn Đúng (True Negative)</span>
+                    <span class="cm-label">Bảo Vệ Vốn (TN)</span>
                     <span class="cm-val" id="cm-tn-val">3,298</span>
-                    <span class="cm-desc">Dự báo GIẢM &rarr; Thực tế GIẢM (Bảo toàn vốn)</span>
+                    <span class="cm-desc">Dự báo GIẢM &rarr; Thực tế GIẢM</span>
                   </div>
                 </div>
               </div>
 
-              <!-- 5-Fold CV -->
               <div class="card sub-card">
                 <h4 class="card-inner-title">Kiểm Định Chéo Chuỗi Thời Gian (5-Fold TimeSeriesSplit)</h4>
-                <p class="card-inner-desc">Kiểm thử tính ổn định qua 5 chu kỳ thị trường khác nhau không rò rỉ tương lai:</p>
                 <div class="cv-folds-list" id="cv-folds-list">
                   <!-- Populated by JS -->
                 </div>
@@ -590,7 +591,6 @@
       </div>
     </section>
 
-
   </main>
 
   <!-- Lightbox Modal for HD Chart Image -->
@@ -599,6 +599,6 @@
     <img src="" alt="Phóng to biểu đồ" class="lightbox-img" id="lightbox-img" />
   </div>
 
-  <script src="app.js?v=5.0"></script>
+  <script src="app.js?v=6.0"></script>
 </body>
 </html>

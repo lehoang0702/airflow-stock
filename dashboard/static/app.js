@@ -1,8 +1,8 @@
 /**
- * QUANTUM MULTI-MODAL DASHBOARD - CLIENT APP LOGIC
- * ==================================================
- * Dual-Panel Telegram Report Chart, Model Switcher, Interactive Candlestick,
- * 4-Model Probability Gauges, and FinBERT News Feed.
+ * QUANTUM MULTI-MODAL DASHBOARD - CLIENT APP LOGIC (v6.0)
+ * =========================================================
+ * Smart Market Screener (20 Stocks Table), Interactive Candlestick with TP/SL Targets,
+ * 4-Model Probability Gauges, FinBERT News Feed, and AI Auditing.
  */
 
 const TICKERS = [
@@ -16,26 +16,80 @@ const TICKERS = [
   'NEE', 'LIN'
 ];
 
+const SECTOR_MAP_VN = {
+  'Technology': 'Công Nghệ',
+  'Consumer Discretionary': 'Tiêu Dùng',
+  'Consumer Staples': 'Hàng Thiết Yếu',
+  'Financials': 'Tài Chính',
+  'Healthcare': 'Y Tế',
+  'Industrials': 'Công Nghiệp',
+  'Energy': 'Năng Lượng',
+  'Utilities': 'Tiện Ích',
+  'Materials': 'Vật Liệu Cơ Bản'
+};
+
 let state = {
   activeTicker: 'AAPL',
-  activeView: 'ensemble', // 'ensemble' | 'xgboost' | 'lstm' | 'finbert' | 'candlestick'
+  activeView: 'candlestick', // 'candlestick' (default) | 'ensemble' | 'xgboost' | 'lstm' | 'finbert'
+  activeTab: 'tab-screener',  // 'tab-screener' | 'tab-charts' | 'tab-audit'
   marketData: null,
-  chartData: {}
+  chartData: {},
+  filterSignal: 'all',        // 'all' | 'buy' | 'hold' | 'sell'
+  filterSector: 'all',        // 'all' | sector string
+  searchKeyword: ''
 };
 
 // ==========================================================================
 // INITIALIZATION
 // ==========================================================================
 document.addEventListener('DOMContentLoaded', () => {
+  initMainTabs();
   initTickerPills();
   initViewButtons();
   initLightbox();
-  initNavPills();
+  initScreenerFilters();
   initEventListeners();
   initAutoRefresh();
   loadAllData();
 });
 
+// 1. Quản lý Tab chính (Screener vs Charts vs Audit)
+function initMainTabs() {
+  const buttons = document.querySelectorAll('#main-nav-pills .nav-pill-btn');
+  buttons.forEach(btn => {
+    btn.addEventListener('click', () => {
+      const targetTab = btn.dataset.tab;
+      switchTab(targetTab);
+    });
+  });
+}
+
+function switchTab(tabId) {
+  state.activeTab = tabId;
+
+  // Cập nhật trạng thái nút
+  document.querySelectorAll('#main-nav-pills .nav-pill-btn').forEach(btn => {
+    if (btn.dataset.tab === tabId) btn.classList.add('active');
+    else btn.classList.remove('active');
+  });
+
+  // Hiển thị panel tương ứng
+  document.querySelectorAll('.tab-panel').forEach(panel => {
+    if (panel.id === tabId) {
+      panel.classList.add('active');
+    } else {
+      panel.classList.remove('active');
+    }
+  });
+
+  // Nếu chuyển sang tab chart thì vẽ lại biểu đồ để fit kích thước
+  if (tabId === 'tab-charts' && state.chartData[state.activeTicker]) {
+    const candles = state.chartData[state.activeTicker].candles || [];
+    setTimeout(() => renderCandlestickSVG(candles), 50);
+  }
+}
+
+// 2. Quản lý thanh chọn nhanh Ticker Pills
 function initTickerPills() {
   const container = document.getElementById('ticker-pills');
   if (!container) return;
@@ -52,20 +106,40 @@ function initTickerPills() {
   });
 }
 
-function selectTicker(ticker) {
+function selectTicker(ticker, shouldSwitchTab = false) {
   state.activeTicker = ticker;
+
+  // Cập nhật pills
   document.querySelectorAll('.ticker-pill').forEach(pill => {
     if (pill.textContent === ticker) pill.classList.add('active');
     else pill.classList.remove('active');
   });
 
+  // Cập nhật header
   updateHeaderActiveTicker();
-  updateReportImage();
+
+  // Tải dữ liệu biểu đồ cho mã mới
   loadTickerChart(ticker);
+
+  if (state.activeView !== 'candlestick') {
+    updateReportImage();
+  }
+
+  // Highlight hàng tương ứng trong bảng Screener nếu đang ở bảng
+  highlightScreenerRow(ticker);
+
+  if (shouldSwitchTab) {
+    switchTab('tab-charts');
+    const chartCard = document.querySelector('.chart-main-card');
+    if (chartCard) {
+      chartCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  }
 }
 
+// 3. Toolbar chuyển chế độ xem biểu đồ (Nến tương tác vs Ảnh báo cáo)
 function initViewButtons() {
-  const buttons = document.querySelectorAll('.view-btn');
+  const buttons = document.querySelectorAll('#view-buttons .view-btn');
   buttons.forEach(btn => {
     btn.addEventListener('click', () => {
       const view = btn.dataset.view;
@@ -76,16 +150,19 @@ function initViewButtons() {
 
       const imgContainer = document.getElementById('report-img-container');
       const candleSection = document.getElementById('candlestick-section');
-      const actions = document.querySelector('.view-actions');
+      const actionsBlock = document.getElementById('view-actions-block');
 
       if (view === 'candlestick') {
         if (imgContainer) imgContainer.classList.add('hidden');
         if (candleSection) candleSection.classList.remove('hidden');
-        if (actions) actions.classList.add('hidden');
+        if (actionsBlock) actionsBlock.classList.add('hidden');
+        if (state.chartData[state.activeTicker]) {
+          renderCandlestickSVG(state.chartData[state.activeTicker].candles || []);
+        }
       } else {
         if (imgContainer) imgContainer.classList.remove('hidden');
         if (candleSection) candleSection.classList.add('hidden');
-        if (actions) actions.classList.remove('hidden');
+        if (actionsBlock) actionsBlock.classList.remove('hidden');
         updateReportImage();
       }
     });
@@ -102,12 +179,8 @@ function updateReportImage() {
 
   img.style.opacity = '0.5';
   img.src = imgUrl;
-  img.onload = () => {
-    img.style.opacity = '1';
-  };
-  img.onerror = () => {
-    img.style.opacity = '1';
-  };
+  img.onload = () => { img.style.opacity = '1'; };
+  img.onerror = () => { img.style.opacity = '1'; };
 
   if (downloadBtn) {
     downloadBtn.href = `/api/chart-image?symbol=${state.activeTicker}&model=${model}`;
@@ -115,6 +188,7 @@ function updateReportImage() {
   }
 }
 
+// 4. Lightbox xem ảnh HD
 function initLightbox() {
   const modal = document.getElementById('lightbox-modal');
   const modalImg = document.getElementById('lightbox-img');
@@ -148,12 +222,59 @@ function initLightbox() {
   });
 }
 
+// 5. Bộ lọc và tìm kiếm trên Bảng 20 Cổ Phiếu (Smart Screener)
+function initScreenerFilters() {
+  // Lọc theo Tín hiệu (MUA / BÁN / CHỜ)
+  const signalButtons = document.querySelectorAll('#signal-filter-group .filter-chip');
+  signalButtons.forEach(btn => {
+    btn.addEventListener('click', () => {
+      signalButtons.forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      state.filterSignal = btn.dataset.filter;
+      applyScreenerFilters();
+    });
+  });
+
+  // Lọc theo Ngành
+  const sectorButtons = document.querySelectorAll('#sector-filter-group .sector-chip');
+  sectorButtons.forEach(btn => {
+    btn.addEventListener('click', () => {
+      sectorButtons.forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      state.filterSector = btn.dataset.sector;
+      applyScreenerFilters();
+    });
+  });
+
+  // Ô tìm kiếm Ticker / Tên
+  const searchInput = document.getElementById('screener-search-input');
+  const clearBtn = document.getElementById('search-clear-btn');
+  if (searchInput) {
+    searchInput.addEventListener('input', (e) => {
+      state.searchKeyword = e.target.value.trim().toLowerCase();
+      if (clearBtn) clearBtn.style.display = state.searchKeyword ? 'block' : 'none';
+      applyScreenerFilters();
+    });
+  }
+
+  if (clearBtn) {
+    clearBtn.addEventListener('click', () => {
+      if (searchInput) {
+        searchInput.value = '';
+        state.searchKeyword = '';
+        clearBtn.style.display = 'none';
+        applyScreenerFilters();
+      }
+    });
+  }
+}
+
+// 6. Nút làm mới dữ liệu
 function initEventListeners() {
   const btnRefresh = document.getElementById('btn-refresh');
   if (btnRefresh) {
     btnRefresh.addEventListener('click', () => {
       btnRefresh.classList.add('rotating');
-      updateReportImage();
       loadAllData().finally(() => {
         setTimeout(() => btnRefresh.classList.remove('rotating'), 500);
       });
@@ -161,21 +282,23 @@ function initEventListeners() {
   }
 }
 
-function initNavPills() {
-  const pills = document.querySelectorAll('.nav-pill-btn');
-  pills.forEach(p => {
-    p.addEventListener('click', () => {
-      pills.forEach(x => x.classList.remove('active'));
-      p.classList.add('active');
-    });
-  });
+// 7. Tự động làm mới chu kỳ 5 phút
+function initAutoRefresh() {
+  setInterval(() => {
+    loadAllData();
+  }, 300000); // 5 phút
 }
 
 // ==========================================================================
-// DATA FETCHING
+// DATA FETCHING & SYNCHRONIZATION
 // ==========================================================================
 async function loadAllData() {
-  updateReportImage();
+  const syncEl = document.getElementById('sync-timestamp');
+  if (syncEl) {
+    const now = new Date();
+    syncEl.textContent = now.toLocaleTimeString('vi-VN') + ' ' + now.toLocaleDateString('vi-VN');
+  }
+
   const chartPromise = loadTickerChart(state.activeTicker);
   const qualityPromise = loadQualityData();
   const evalPromise = loadEvaluationData();
@@ -183,29 +306,37 @@ async function loadAllData() {
   try {
     const marketRes = await fetch('/api/market').then(r => r.json());
     state.marketData = marketRes;
-    renderHeaderMetrics(marketRes);
+    renderHeaderMarketOverview(marketRes);
+    renderTopPicksBanner(marketRes);
+    renderScreenerTable(marketRes);
     updateTickerPredictions(state.activeTicker);
   } catch (err) {
-    console.error('Lỗi nạp dữ liệu market:', err);
-  }
-
-  const syncEl = document.getElementById('sync-timestamp');
-  if (syncEl) {
-    const now = new Date();
-    syncEl.textContent = now.toLocaleTimeString('vi-VN') + ' ' + now.toLocaleDateString('vi-VN');
+    console.error('Lỗi nạp dữ liệu Market:', err);
   }
 
   await Promise.allSettled([chartPromise, qualityPromise, evalPromise]);
 }
 
-function renderHeaderMetrics(market) {
+// Cập nhật Header Market Overview
+function renderHeaderMarketOverview(market) {
+  if (!market) return;
+
   const moodEl = document.getElementById('header-market-mood');
-  if (moodEl && market) {
-    moodEl.textContent = market.market_mood || 'SIDEWAY';
-    moodEl.style.color = (market.buy_count || 0) > (market.sell_count || 0) 
-      ? 'var(--accent-green)' 
-      : ((market.sell_count || 0) > (market.buy_count || 0) ? 'var(--accent-red)' : 'var(--accent-yellow)');
+  if (moodEl) {
+    moodEl.textContent = market.market_mood || 'SIDEWAY (ĐI NGANG)';
+    const isBull = (market.buy_count || 0) > (market.sell_count || 0);
+    const isBear = (market.sell_count || 0) > (market.buy_count || 0);
+    moodEl.style.color = isBull ? 'var(--accent-green)' : (isBear ? 'var(--accent-red)' : 'var(--accent-yellow)');
   }
+
+  const buyCountEl = document.getElementById('summary-buy-count');
+  const holdCountEl = document.getElementById('summary-hold-count');
+  const sellCountEl = document.getElementById('summary-sell-count');
+
+  if (buyCountEl) buyCountEl.textContent = `${market.buy_count || 0} MUA`;
+  if (holdCountEl) holdCountEl.textContent = `${market.hold_count || 0} CHỜ`;
+  if (sellCountEl) sellCountEl.textContent = `${market.sell_count || 0} BÁN`;
+
   updateHeaderActiveTicker();
 }
 
@@ -217,16 +348,249 @@ function updateHeaderActiveTicker() {
   if (signalEl && state.marketData && state.marketData.predictions) {
     const pred = state.marketData.predictions.find(p => p.ticker === state.activeTicker);
     if (pred) {
-      signalEl.textContent = `${pred.pp4_tong_hop} (${pred.prob_ensemble}%)`;
-      signalEl.style.color = pred.pp4_tong_hop.includes('MUA')
-        ? 'var(--accent-green)'
-        : (pred.pp4_tong_hop.includes('BÁN') ? 'var(--accent-red)' : 'var(--accent-yellow)');
+      const action = pred.pp4_tong_hop || 'THEO DÕI';
+      signalEl.textContent = `${action} (${pred.prob_ensemble}%)`;
+      signalEl.className = `ticker-signal-chip ${action.includes('MUA') ? 'chip-green' : (action.includes('BÁN') ? 'chip-red' : 'chip-yellow')}`;
     }
   }
 }
 
+// ==========================================================================
+// TAB 1: BẢNG 20 CỔ PHIẾU THÔNG MINH (SMART MARKET SCREENER)
+// ==========================================================================
+
+// Top Opportunity Spotlight Banner (Top 3 mã MUA)
+function renderTopPicksBanner(market) {
+  const container = document.getElementById('top-picks-container');
+  if (!container || !market || !market.predictions) return;
+
+  const buyPicks = market.predictions
+    .filter(p => (p.pp4_tong_hop || '').includes('MUA') || p.prob_ensemble >= 53)
+    .sort((a, b) => b.prob_ensemble - a.prob_ensemble)
+    .slice(0, 3);
+
+  if (buyPicks.length === 0) {
+    container.innerHTML = `
+      <div class="empty-top-picks">
+        <span>Thị trường đang trong pha tích lũy / đi ngang. Hệ thống khuyến nghị ưu tiên quan sát và quản trị rủi ro vốn.</span>
+      </div>
+    `;
+    return;
+  }
+
+  container.innerHTML = buyPicks.map((pick, idx) => {
+    const isStrong = pick.pp4_tong_hop.includes('MẠNH') || pick.prob_ensemble >= 58;
+    return `
+      <div class="top-pick-card" onclick="selectTicker('${pick.ticker}', true)">
+        <div class="pick-badge-rank">#${idx + 1} TIỀM NĂNG NHẤT</div>
+        <div class="pick-top-row">
+          <span class="pick-ticker">${pick.ticker}</span>
+          <span class="pick-action ${isStrong ? 'strong' : ''}">${pick.pp4_tong_hop}</span>
+        </div>
+        <div class="pick-name">${pick.name}</div>
+        <div class="pick-metrics-row">
+          <div>
+            <span class="m-lbl">Giá Vào (Entry):</span>
+            <strong class="m-val">$${pick.current_price.toFixed(2)}</strong>
+          </div>
+          <div>
+            <span class="m-lbl">Mục Tiêu (TP):</span>
+            <strong class="m-val text-success">$${pick.plan_target.toFixed(2)} (+${pick.plan_tp_pct}%)</strong>
+          </div>
+          <div>
+            <span class="m-lbl">Đồng Thuận:</span>
+            <strong class="m-val text-purple">${pick.prob_ensemble}%</strong>
+          </div>
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+// Render toàn bộ dữ liệu bảng Screener
+function renderScreenerTable(market) {
+  applyScreenerFilters();
+}
+
+function applyScreenerFilters() {
+  const tbody = document.getElementById('screener-table-body');
+  const countEl = document.getElementById('screener-records-count');
+  if (!tbody || !state.marketData || !state.marketData.predictions) return;
+
+  const preds = state.marketData.predictions;
+
+  const filtered = preds.filter(p => {
+    // 1. Lọc theo Signal
+    if (state.filterSignal === 'buy') {
+      if (!p.pp4_tong_hop.includes('MUA') && p.prob_ensemble < 53) return false;
+    } else if (state.filterSignal === 'hold') {
+      if (p.pp4_tong_hop.includes('MUA') || p.pp4_tong_hop.includes('BÁN')) return false;
+    } else if (state.filterSignal === 'sell') {
+      if (!p.pp4_tong_hop.includes('BÁN') && p.prob_ensemble > 47) return false;
+    }
+
+    // 2. Lọc theo Sector
+    if (state.filterSector !== 'all') {
+      const sec = (p.sector || '').toLowerCase();
+      const targetSec = state.filterSector.toLowerCase();
+      if (!sec.includes(targetSec)) return false;
+    }
+
+    // 3. Tìm kiếm theo keyword
+    if (state.searchKeyword) {
+      const kw = state.searchKeyword;
+      const matchTicker = p.ticker.toLowerCase().includes(kw);
+      const matchName = (p.name || '').toLowerCase().includes(kw);
+      const matchSector = (p.sector || '').toLowerCase().includes(kw);
+      if (!matchTicker && !matchName && !matchSector) return false;
+    }
+
+    return true;
+  });
+
+  if (countEl) {
+    countEl.textContent = `Hiển thị ${filtered.length}/${preds.length} cổ phiếu`;
+  }
+
+  if (filtered.length === 0) {
+    tbody.innerHTML = `
+      <tr>
+        <td colspan="10" class="table-empty">
+          <div class="empty-state-box">
+            <span class="empty-state-icon">🔍</span>
+            <p>Không tìm thấy mã cổ phiếu nào phù hợp với bộ lọc hiện tại.</p>
+          </div>
+        </td>
+      </tr>
+    `;
+    return;
+  }
+
+  tbody.innerHTML = filtered.map(p => {
+    const isSelected = (p.ticker === state.activeTicker);
+    const action = p.pp4_tong_hop || 'ĐỨNG NGOÀI';
+    const isBuy = action.includes('MUA');
+    const isSell = action.includes('BÁN');
+
+    let badgeClass = 'badge-hold';
+    if (action.includes('MUA MẠNH')) badgeClass = 'badge-strong-buy';
+    else if (isBuy) badgeClass = 'badge-buy';
+    else if (isSell) badgeClass = 'badge-sell';
+
+    const tpText = isBuy && p.plan_target > 0 
+      ? `$${p.plan_target.toFixed(2)} <span class="sub-pct text-success">(+${p.plan_tp_pct}%)</span>` 
+      : '<span class="text-muted">N/A</span>';
+
+    const slText = isBuy && p.plan_stop_loss > 0 
+      ? `$${p.plan_stop_loss.toFixed(2)} <span class="sub-pct text-danger">(-${p.plan_sl_pct}%)</span>` 
+      : '<span class="text-muted">N/A</span>';
+
+    const rrText = isBuy ? '<span class="rr-badge">1 : 2</span>' : '<span class="text-muted">N/A</span>';
+
+    return `
+      <tr class="screener-row ${isSelected ? 'selected' : ''}" data-ticker="${p.ticker}" onclick="selectTicker('${p.ticker}', false)">
+        <td class="td-ticker">
+          <div class="ticker-identity">
+            <span class="ticker-sym">${p.ticker}</span>
+            <span class="ticker-corp">${p.name}</span>
+          </div>
+        </td>
+        <td class="td-sector">
+          <span class="sector-pill">${p.sector}</span>
+        </td>
+        <td class="td-price">
+          <strong>$${p.current_price.toFixed(2)}</strong>
+        </td>
+        <td class="td-signal">
+          <span class="ai-signal-badge ${badgeClass}">${action}</span>
+        </td>
+        <td class="td-confidence">
+          <div class="confidence-bar-wrap">
+            <div class="confidence-bar-track">
+              <div class="confidence-bar-fill ${isBuy ? 'green' : (isSell ? 'red' : 'yellow')}" style="width: ${p.prob_ensemble}%;"></div>
+            </div>
+            <span class="confidence-num">${p.prob_ensemble}%</span>
+          </div>
+        </td>
+        <td class="td-entry">
+          ${isBuy ? `<b>$${p.plan_entry.toFixed(2)}</b>` : '<span class="text-muted">--</span>'}
+        </td>
+        <td class="td-tp">
+          ${tpText}
+        </td>
+        <td class="td-sl">
+          ${slText}
+        </td>
+        <td class="td-rr">
+          ${rrText}
+        </td>
+        <td class="td-action">
+          <button class="btn-table-action" onclick="event.stopPropagation(); selectTicker('${p.ticker}', true)">
+            Biểu Đồ ➔
+          </button>
+        </td>
+      </tr>
+    `;
+  }).join('');
+}
+
+function highlightScreenerRow(ticker) {
+  document.querySelectorAll('.screener-row').forEach(row => {
+    if (row.dataset.ticker === ticker) row.classList.add('selected');
+    else row.classList.remove('selected');
+  });
+}
+
+// ==========================================================================
+// TAB 2: INTERACTIVE CANDLESTICK CHART & AI PROBABILITY GAUGES
+// ==========================================================================
+
+async function loadTickerChart(ticker) {
+  try {
+    const res = await fetch(`/api/ticker?symbol=${ticker}`).then(r => r.json());
+    state.chartData[ticker] = res;
+
+    // Cập nhật Tên & Thông tin mã
+    const tickerNameEl = document.getElementById('chart-ticker-name');
+    if (tickerNameEl) tickerNameEl.textContent = res.ticker || ticker;
+
+    const companyNameEl = document.getElementById('chart-company-name');
+    if (companyNameEl) companyNameEl.textContent = res.name || ticker;
+
+    const sectorEl = document.getElementById('chart-sector');
+    if (sectorEl) {
+      const rawSector = res.sector || 'Technology';
+      sectorEl.textContent = SECTOR_MAP_VN[rawSector] || rawSector;
+    }
+
+    const sideSymEl = document.getElementById('side-ticker-symbol');
+    if (sideSymEl) sideSymEl.textContent = ticker;
+
+    // Cập nhật giá nến gần nhất
+    const candles = res.candles || [];
+    if (candles.length > 0) {
+      const lastCandle = candles[candles.length - 1];
+      const curPriceEl = document.getElementById('chart-current-price');
+      if (curPriceEl) {
+        curPriceEl.textContent = `$${lastCandle.close.toFixed(2)}`;
+      }
+    }
+
+    // Cập nhật Trading Plan summary
+    updateTickerPredictions(ticker);
+
+    // Cập nhật tin tức FinBERT
+    renderNews(res.news || []);
+
+    // Vẽ biểu đồ nến SVG tương tác
+    renderCandlestickSVG(candles);
+  } catch (e) {
+    console.error(`Lỗi tải biểu đồ ${ticker}:`, e);
+  }
+}
+
 function updateTickerPredictions(ticker) {
-  const pred = (state.marketData && state.marketData.predictions) 
+  const pred = (state.marketData && state.marketData.predictions)
     ? state.marketData.predictions.find(p => p.ticker === ticker)
     : null;
 
@@ -238,11 +602,27 @@ function updateTickerPredictions(ticker) {
 
     const badge = document.getElementById('chart-signal-badge');
     if (badge) {
-      badge.textContent = pred.pp4_tong_hop || 'THEO DÕI';
-      badge.className = `price-badge ${pred.pp4_tong_hop.includes('MUA') ? 'stat-badge green' : (pred.pp4_tong_hop.includes('BÁN') ? 'stat-badge red' : 'stat-badge yellow')}`;
+      const action = pred.pp4_tong_hop || 'THEO DÕI';
+      badge.textContent = action;
+      badge.className = `price-badge ${action.includes('MUA') ? 'stat-badge green' : (action.includes('BÁN') ? 'stat-badge red' : 'stat-badge yellow')}`;
     }
 
-    // 4-Model Gauges
+    // Cập nhật Trading Plan Header Mini Card
+    const pEntry = document.getElementById('chart-plan-entry');
+    const pTp = document.getElementById('chart-plan-tp');
+    const pSl = document.getElementById('chart-plan-sl');
+    const pRr = document.getElementById('chart-plan-rr');
+
+    if (pEntry) pEntry.textContent = `$${pred.plan_entry.toFixed(2)}`;
+    if (pTp) {
+      pTp.textContent = pred.plan_target > 0 ? `$${pred.plan_target.toFixed(2)} (+${pred.plan_tp_pct}%)` : 'N/A';
+    }
+    if (pSl) {
+      pSl.textContent = pred.plan_stop_loss > 0 ? `$${pred.plan_stop_loss.toFixed(2)} (-${pred.plan_sl_pct}%)` : 'N/A';
+    }
+    if (pRr) pRr.textContent = pred.plan_rr;
+
+    // 4 Model Gauges
     const setGauge = (idVal, idBar, val) => {
       const vEl = document.getElementById(idVal);
       const bEl = document.getElementById(idBar);
@@ -259,68 +639,12 @@ function updateTickerPredictions(ticker) {
   updateHeaderActiveTicker();
 }
 
-// ==========================================================================
-// CANDLESTICK CHART & DETAILS RENDERING
-// ==========================================================================
-const SECTOR_MAP_VN = {
-  'Technology': 'Công Nghệ',
-  'Consumer Discretionary': 'Tiêu Dùng',
-  'Consumer Staples': 'Hàng Thiết Yếu',
-  'Financials': 'Tài Chính',
-  'Healthcare': 'Y Tế',
-  'Industrials': 'Công Nghiệp',
-  'Energy': 'Năng Lượng',
-  'Utilities': 'Tiện Ích',
-  'Materials': 'Vật Liệu Cơ Bản'
-};
-
-async function loadTickerChart(ticker) {
-  try {
-    const res = await fetch(`/api/ticker?symbol=${ticker}`).then(r => r.json());
-    state.chartData[ticker] = res;
-
-    // Cập nhật Header Ticker
-    const tickerNameEl = document.getElementById('chart-ticker-name');
-    if (tickerNameEl) tickerNameEl.textContent = res.ticker || ticker;
-    
-    const companyNameEl = document.getElementById('chart-company-name');
-    if (companyNameEl) companyNameEl.textContent = res.name || ticker;
-
-    const sectorEl = document.getElementById('chart-sector');
-    if (sectorEl) {
-      const rawSector = res.sector || 'Technology';
-      sectorEl.textContent = SECTOR_MAP_VN[rawSector] || rawSector;
-    }
-
-    // Cập nhật giá từ nến gần nhất nếu có
-    const candles = res.candles || [];
-    if (candles.length > 0) {
-      const lastCandle = candles[candles.length - 1];
-      const curPriceEl = document.getElementById('chart-current-price');
-      if (curPriceEl) {
-        curPriceEl.textContent = `$${lastCandle.close.toFixed(2)}`;
-      }
-    }
-
-    // Áp dụng dự báo từ mô hình AI
-    updateTickerPredictions(ticker);
-
-    // Tin tức FinBERT
-    renderNews(res.news || []);
-
-    // Vẽ biểu đồ nến (cho tab Nến Nhật)
-    renderCandlestickSVG(candles);
-  } catch (e) {
-    console.error(`Lỗi tải biểu đồ ${ticker}:`, e);
-  }
-}
-
 function renderNews(newsList) {
   const container = document.getElementById('side-news-list');
   if (!container) return;
 
   if (newsList.length === 0) {
-    container.innerHTML = `<div class="empty-news" style="padding: 16px; color: var(--text-muted); font-size: 12px; text-align: center;">Chưa có bài báo nào được phân loại trong 72h qua.</div>`;
+    container.innerHTML = `<div class="empty-news" style="padding: 16px; color: var(--text-muted); font-size: 12px; text-align: center;">Chưa có bài báo nào phân loại trong 72h qua.</div>`;
     return;
   }
 
@@ -335,12 +659,13 @@ function renderNews(newsList) {
   `).join('');
 }
 
+// Vẽ biểu đồ nến SVG kèm đường Take Profit & Stop Loss trực quan
 function renderCandlestickSVG(candles) {
   const svg = document.getElementById('candlestick-svg');
   const rsiSvg = document.getElementById('rsi-svg');
   const tooltip = document.getElementById('chart-tooltip');
   if (!svg || candles.length === 0) {
-    if (svg) svg.innerHTML = `<text x="50%" y="50%" text-anchor="middle" fill="#64748B" font-size="14">Không có dữ liệu nến cho mã này</text>`;
+    if (svg) svg.innerHTML = `<text x="50%" y="50%" text-anchor="middle" fill="#64748B" font-size="14">Đang chuẩn bị nến cho mã này...</text>`;
     return;
   }
 
@@ -348,17 +673,30 @@ function renderCandlestickSVG(candles) {
   const height = 340;
   svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
 
-  // Tìm min/max giá
+  // Lấy thông tin plan để vẽ TP/SL
+  const pred = (state.marketData && state.marketData.predictions)
+    ? state.marketData.predictions.find(p => p.ticker === state.activeTicker)
+    : null;
+
+  const hasPlan = pred && pred.pp4_tong_hop.includes('MUA') && pred.plan_target > 0;
+
+  // Tính min / max giá
   let minP = Math.min(...candles.map(c => c.low));
   let maxP = Math.max(...candles.map(c => c.high));
+
+  if (hasPlan) {
+    minP = Math.min(minP, pred.plan_stop_loss * 0.99);
+    maxP = Math.max(maxP, pred.plan_target * 1.01);
+  }
+
   const padP = (maxP - minP) * 0.05 || 1.0;
   minP -= padP;
   maxP += padP;
 
-  const paddingLeft = 10;
-  const paddingRight = 60;
-  const paddingTop = 20;
-  const paddingBottom = 40;
+  const paddingLeft = 15;
+  const paddingRight = 75;
+  const paddingTop = 25;
+  const paddingBottom = 30;
   const chartW = width - paddingLeft - paddingRight;
   const chartH = height - paddingTop - paddingBottom;
 
@@ -380,7 +718,23 @@ function renderCandlestickSVG(candles) {
     html += `<text x="${width - paddingRight + 8}" y="${y + 4}" fill="#64748B" font-size="10" font-family="monospace">$${p.toFixed(2)}</text>`;
   }
 
-  // 2. Tính và vẽ đường MA20
+  // 2. Vẽ đường Take Profit & Stop Loss nếu có
+  if (hasPlan) {
+    const yTp = getY(pred.plan_target);
+    const ySl = getY(pred.plan_stop_loss);
+
+    // Take Profit Line
+    html += `<line x1="${paddingLeft}" y1="${yTp}" x2="${width - paddingRight}" y2="${yTp}" stroke="#10B981" stroke-width="1.5" stroke-dasharray="4,4" />`;
+    html += `<rect x="${width - paddingRight + 4}" y="${yTp - 9}" width="68" height="18" fill="#10B981" rx="3" opacity="0.9" />`;
+    html += `<text x="${width - paddingRight + 8}" y="${yTp + 3}" fill="#FFFFFF" font-size="9" font-weight="700">TP: $${pred.plan_target.toFixed(1)}</text>`;
+
+    // Stop Loss Line
+    html += `<line x1="${paddingLeft}" y1="${ySl}" x2="${width - paddingRight}" y2="${ySl}" stroke="#F43F5E" stroke-width="1.5" stroke-dasharray="4,4" />`;
+    html += `<rect x="${width - paddingRight + 4}" y="${ySl - 9}" width="68" height="18" fill="#F43F5E" rx="3" opacity="0.9" />`;
+    html += `<text x="${width - paddingRight + 8}" y="${ySl + 3}" fill="#FFFFFF" font-size="9" font-weight="700">SL: $${pred.plan_stop_loss.toFixed(1)}</text>`;
+  }
+
+  // 3. Đường MA20
   let maPoints = [];
   for (let i = 0; i < candles.length; i++) {
     if (i >= 19) {
@@ -394,7 +748,7 @@ function renderCandlestickSVG(candles) {
     html += `<polyline fill="none" stroke="#F59E0B" stroke-width="2" points="${maPoints.join(' ')}" opacity="0.85" />`;
   }
 
-  // 3. Vẽ nến OHLCV kèm tương tác Hover
+  // 4. Vẽ nến OHLCV
   candles.forEach((c, i) => {
     const x = paddingLeft + i * stepX;
     const isGreen = c.close >= c.open;
@@ -410,7 +764,7 @@ function renderCandlestickSVG(candles) {
 
     // Wick
     html += `<line x1="${x + candleW / 2}" y1="${yHigh}" x2="${x + candleW / 2}" y2="${yLow}" stroke="${color}" stroke-width="1.5" />`;
-    // Body with data attributes
+    // Body
     html += `<rect class="candle-bar" data-idx="${i}" x="${x}" y="${bodyY}" width="${candleW}" height="${bodyH}" fill="${color}" rx="1" style="cursor: pointer;" />`;
   });
 
@@ -433,7 +787,7 @@ function renderCandlestickSVG(candles) {
           <div>Mở: <b>$${c.open.toFixed(2)}</b> | Đóng: <b style="color: ${isUp ? '#10B981' : '#F43F5E'}">$${c.close.toFixed(2)}</b></div>
           <div>Cao: $${c.high.toFixed(2)} | Thấp: $${c.low.toFixed(2)}</div>
           <div>Biến động: <b style="color: ${isUp ? '#10B981' : '#F43F5E'}">${diff >= 0 ? '+' : ''}${diff.toFixed(2)} (${diffPct.toFixed(2)}%)</b></div>
-          ${c.volume ? `<div>K.Lượng: ${c.volume.toLocaleString()}</div>` : ''}
+          ${c.volume ? `<div>Khối lượng: ${c.volume.toLocaleString()}</div>` : ''}
           ${c.rsi ? `<div>RSI: <b>${c.rsi.toFixed(1)}</b></div>` : ''}
         `;
         tooltip.classList.remove('hidden');
@@ -450,23 +804,23 @@ function renderCandlestickSVG(candles) {
     });
   }
 
-  // 4. Vẽ RSI Subchart
+  // 5. RSI Subchart
   if (rsiSvg && candles.some(c => c.rsi)) {
     const rsiW = rsiSvg.clientWidth || width;
-    const rsiH = 80;
+    const rsiH = 75;
     rsiSvg.setAttribute('viewBox', `0 0 ${rsiW} ${rsiH}`);
 
     let rsiHtml = `
-      <line x1="${paddingLeft}" y1="24" x2="${rsiW - paddingRight}" y2="24" stroke="rgba(244,63,94,0.3)" stroke-dasharray="2,2" />
-      <text x="${rsiW - paddingRight + 6}" y="27" fill="#F43F5E" font-size="9">70</text>
-      <line x1="${paddingLeft}" y1="56" x2="${rsiW - paddingRight}" y2="56" stroke="rgba(16,185,129,0.3)" stroke-dasharray="2,2" />
-      <text x="${rsiW - paddingRight + 6}" y="59" fill="#10B981" font-size="9">30</text>
+      <line x1="${paddingLeft}" y1="22" x2="${rsiW - paddingRight}" y2="22" stroke="rgba(244,63,94,0.35)" stroke-dasharray="2,2" />
+      <text x="${rsiW - paddingRight + 6}" y="25" fill="#F43F5E" font-size="9">70 (Quá mua)</text>
+      <line x1="${paddingLeft}" y1="52" x2="${rsiW - paddingRight}" y2="52" stroke="rgba(16,185,129,0.35)" stroke-dasharray="2,2" />
+      <text x="${rsiW - paddingRight + 6}" y="55" fill="#10B981" font-size="9">30 (Quá bán)</text>
     `;
 
     const rsiPoints = candles.map((c, i) => {
       const x = paddingLeft + i * stepX + candleW / 2;
-      const y = 8 + (70 - 8) - ((c.rsi - 20) / (80 - 20)) * (70 - 8);
-      return `${x},${Math.max(5, Math.min(75, y))}`;
+      const y = 6 + (65 - 6) - ((c.rsi - 20) / (80 - 20)) * (65 - 6);
+      return `${x},${Math.max(4, Math.min(70, y))}`;
     }).join(' ');
 
     rsiHtml += `<polyline fill="none" stroke="#A855F7" stroke-width="1.5" points="${rsiPoints}" />`;
@@ -479,14 +833,14 @@ function renderCandlestickSVG(candles) {
 }
 
 // ==========================================================================
-// DATA QUALITY GATE RENDERING
+// TAB 3: DATA QUALITY GATE & MODEL EVALUATION AUDITING
 // ==========================================================================
+
 async function loadQualityData() {
   try {
     const res = await fetch('/api/quality').then(r => r.json());
     if (!res) return;
 
-    // Trạng thái tổng thể
     const statusTextEl = document.getElementById('quality-status-text');
     const badgeEl = document.getElementById('quality-overall-badge');
     if (statusTextEl && badgeEl) {
@@ -501,66 +855,27 @@ async function loadQualityData() {
       }
     }
 
-    // Điểm sức khỏe tổng thể
     const missPct = res.avg_missing_pct || 1.66;
     const healthScore = Math.max(90, (100 - missPct)).toFixed(1);
     const healthEl = document.getElementById('qa-health-score');
     if (healthEl) healthEl.textContent = `${healthScore}%`;
 
-    // Độ phủ cổ phiếu
     const covEl = document.getElementById('qa-ticker-coverage');
     if (covEl) covEl.textContent = `${res.tickers_count || 20} / 20 Mã`;
 
-    // Độ sạch dữ liệu
     const cleanEl = document.getElementById('qa-clean-pct');
     if (cleanEl) cleanEl.textContent = `${(100 - missPct).toFixed(2)}%`;
 
-    // Tóm tắt KPI
     const rowEl = document.getElementById('qa-total-rows');
     if (rowEl) rowEl.textContent = `${(res.total_rows || 50180).toLocaleString()} Phiên`;
 
     const colEl = document.getElementById('qa-total-cols');
     if (colEl) colEl.textContent = `${res.total_columns || 117} Biến Số`;
-
-    // Bảng dữ liệu từng tập
-    const tbody = document.getElementById('qa-datasets-body');
-    if (tbody && res.datasets) {
-      tbody.innerHTML = res.datasets.map(d => {
-        let name = d.name;
-        if (name.includes('XGBoost')) name = 'Tập dữ liệu đặc trưng XGBoost';
-        else if (name.includes('LSTM')) name = 'Tập dữ liệu chuỗi nến LSTM';
-        const st = (d.status === 'PASSED') ? 'ĐẠT CHUẨN' : 'CẢNH BÁO';
-        return `
-          <tr>
-            <td><strong>${name}</strong></td>
-            <td>${(d.rows || 0).toLocaleString()} dòng</td>
-            <td>${d.columns} biến</td>
-            <td>${d.tickers}/20 mã</td>
-            <td><span class="badge-passed">${st}</span></td>
-          </tr>
-        `;
-      }).join('');
-    }
-
-    // Cảnh báo MLOps
-    const warnMsgEl = document.getElementById('qa-warning-msg');
-    if (warnMsgEl && res.datasets) {
-      const allWarns = res.datasets.flatMap(d => d.warnings || []);
-      if (allWarns.length > 0) {
-        warnMsgEl.textContent = allWarns.join('; ');
-      } else {
-        warnMsgEl.textContent = 'Toàn bộ chỉ báo kỹ thuật của 20 mã đều đạt chuẩn chất lượng 100%, không phát hiện lỗi bất thường.';
-      }
-    }
-
   } catch (err) {
-    console.error('Lỗi tải dữ liệu Data Quality:', err);
+    console.error('Lỗi tải Data Quality:', err);
   }
 }
 
-// ==========================================================================
-// MLOPS MODEL EVALUATION RENDERING
-// ==========================================================================
 async function loadEvaluationData() {
   try {
     const res = await fetch('/api/evaluation').then(r => r.json());
@@ -569,159 +884,71 @@ async function loadEvaluationData() {
     const dateEl = document.getElementById('eval-date-str');
     if (dateEl && res.date) dateEl.textContent = res.date;
 
-    // 1. Bảng So Sánh 4 Mô Hình
-    const tbody = document.getElementById('eval-benchmark-body');
-    if (tbody && res.models_comparison) {
-      const assessments = {
-        'XGBoost': 'Phân tích 83 đặc trưng kỹ thuật dạng bảng (Tabular Data)',
-        'LSTM': 'Mạng nơ-ron hồi quy phân tích chuỗi thời gian & bẫy giảm',
-        'FinBERT': 'Mô hình Transformer phân loại cảm xúc tin tức tài chính',
-        'Ensemble Master': 'Hợp nhất đa phương thức, tối ưu hóa lợi nhuận & ổn định'
-      };
-
-      tbody.innerHTML = res.models_comparison.map(m => {
-        const isEnsemble = m.model.includes('Ensemble');
-        const accPct = (m.accuracy * 100).toFixed(2);
-        const aucVal = (m.auc_roc || 0.5).toFixed(4);
-        const prec = `${(m.precision_class1 * 100).toFixed(1)}% / ${(m.precision_class0 * 100).toFixed(1)}%`;
-        const rec = `${(m.recall_class1 * 100).toFixed(1)}% / ${(m.recall_class0 * 100).toFixed(1)}%`;
-        const f1 = `${m.f1_score_class1.toFixed(3)} / ${m.f1_score_class0.toFixed(3)}`;
-        const samples = m.total_samples ? (m.total_samples > 100 ? `${m.total_samples.toLocaleString()} mẫu` : `${m.total_samples} bài`) : '--';
-
-        return `
-          <tr class="${isEnsemble ? 'highlight-row' : ''}">
-            <td><strong>${m.model}</strong></td>
-            <td><span class="${parseFloat(accPct) >= 50 ? 'text-success' : ''}" style="font-weight:700;">${accPct}%</span></td>
-            <td><strong style="color: #a855f7;">${aucVal}</strong></td>
-            <td>${prec}</td>
-            <td>${rec}</td>
-            <td>${f1}</td>
-            <td>${samples}</td>
-            <td style="font-size: 12px; color: var(--text-secondary);">${assessments[m.model] || 'Mô hình định lượng AI'}</td>
-          </tr>
-        `;
-      }).join('');
-
-      // Cập nhật thẻ Leaderboard trực quan
+    // Leaderboard cards
+    if (res.models_comparison) {
       res.models_comparison.forEach(m => {
-        const accPct = (m.accuracy * 100).toFixed(1) + '%';
+        const accPct = (m.accuracy * 100).toFixed(1);
         if (m.model.includes('Ensemble')) {
           const el = document.getElementById('leaderboard-ensemble-winrate');
           const bar = document.getElementById('leaderboard-ensemble-bar');
-          if (el) el.textContent = accPct;
-          if (bar) bar.style.width = accPct;
+          if (el) el.textContent = `${accPct}%`;
+          if (bar) bar.style.width = `${accPct}%`;
         } else if (m.model.includes('XGBoost')) {
           const el = document.getElementById('leaderboard-xgboost-winrate');
           const bar = document.getElementById('leaderboard-xgboost-bar');
-          if (el) el.textContent = accPct;
-          if (bar) bar.style.width = accPct;
+          if (el) el.textContent = `${accPct}%`;
+          if (bar) bar.style.width = `${accPct}%`;
         } else if (m.model.includes('FinBERT')) {
           const el = document.getElementById('leaderboard-finbert-winrate');
           const bar = document.getElementById('leaderboard-finbert-bar');
-          if (el) el.textContent = accPct;
-          if (bar) bar.style.width = accPct;
+          if (el) el.textContent = `${accPct}%`;
+          if (bar) bar.style.width = `${accPct}%`;
         } else if (m.model.includes('LSTM')) {
           const el = document.getElementById('leaderboard-lstm-winrate');
           const bar = document.getElementById('leaderboard-lstm-bar');
-          if (el) el.textContent = accPct;
-          if (bar) bar.style.width = accPct;
+          if (el) el.textContent = `${accPct}%`;
+          if (bar) bar.style.width = `${accPct}%`;
         }
       });
-    }
 
-    // 2. Confusion Matrix
-    const xgbOrEnsemble = (res.models_comparison && res.models_comparison.find(m => m.model === 'XGBoost')) || {};
-    const tpEl = document.getElementById('cm-tp-val');
-    const fpEl = document.getElementById('cm-fp-val');
-    const fnEl = document.getElementById('cm-fn-val');
-    const tnEl = document.getElementById('cm-tn-val');
+      // Bảng so sánh khoa học
+      const tbody = document.getElementById('eval-benchmark-body');
+      if (tbody) {
+        tbody.innerHTML = res.models_comparison.map(m => {
+          const isEnsemble = m.model.includes('Ensemble');
+          const accPct = (m.accuracy * 100).toFixed(2);
+          const aucVal = (m.auc_roc || 0.5).toFixed(4);
+          const prec = `${(m.precision_class1 * 100).toFixed(1)}% / ${(m.precision_class0 * 100).toFixed(1)}%`;
+          const rec = `${(m.recall_class1 * 100).toFixed(1)}% / ${(m.recall_class0 * 100).toFixed(1)}%`;
+          const f1 = `${m.f1_score_class1.toFixed(3)} / ${m.f1_score_class0.toFixed(3)}`;
+          const samples = m.total_samples ? (m.total_samples > 100 ? `${m.total_samples.toLocaleString()} mẫu` : `${m.total_samples} bài`) : '--';
 
-    if (tpEl) tpEl.textContent = (xgbOrEnsemble.true_positives || 3062).toLocaleString();
-    if (fpEl) fpEl.textContent = (xgbOrEnsemble.false_positives || 3057).toLocaleString();
-    if (fnEl) fnEl.textContent = (xgbOrEnsemble.false_negatives || 3294).toLocaleString();
-    if (tnEl) tnEl.textContent = (xgbOrEnsemble.true_negatives || 3298).toLocaleString();
-
-    // 3. 5-Fold TimeSeriesSplit Cross-Validation
-    const foldsContainer = document.getElementById('cv-folds-list');
-    if (foldsContainer && res.cross_validation_folds) {
-      foldsContainer.innerHTML = res.cross_validation_folds.map(f => `
-        <div class="cv-fold-item">
-          <span class="cv-fold-tag">Vòng ${f.fold} (Huấn luyện: ${f.train_size.toLocaleString()} | Kiểm thử: ${f.test_size.toLocaleString()})</span>
-          <span class="cv-fold-stat">Độ chính xác: ${(f.accuracy * 100).toFixed(2)}% | AUC: ${f.auc_roc.toFixed(4)}</span>
-        </div>
-      `).join('');
-    }
-
-    const cvStatEl = document.getElementById('cv-summary-stat');
-    if (cvStatEl && xgbOrEnsemble.cv_accuracy_mean) {
-      const mean = (xgbOrEnsemble.cv_accuracy_mean * 100).toFixed(2);
-      const std = (xgbOrEnsemble.cv_accuracy_std * 100).toFixed(2);
-      cvStatEl.textContent = `${mean}% ± ${std}% (Độ lệch chuẩn thấp → Không Overfitting)`;
-    }
-
-    // 4. FinBERT Sentiment Correlation
-    const fb = res.finbert_evaluation;
-    if (fb) {
-      const sAccEl = document.getElementById('sb-accuracy');
-      if (sAccEl) sAccEl.textContent = `${(fb.sentiment_accuracy * 100).toFixed(2)}%`;
-
-      const sAucEl = document.getElementById('sb-auc');
-      if (sAucEl) sAucEl.textContent = fb.sentiment_auc_roc.toFixed(4);
-
-      const sCorrEl = document.getElementById('sb-corr');
-      if (sCorrEl) sCorrEl.textContent = `${fb.sentiment_correlation >= 0 ? '+' : ''}${fb.sentiment_correlation.toFixed(4)}`;
-
-      const sCountEl = document.getElementById('sb-count');
-      if (sCountEl) sCountEl.textContent = `${fb.total_evaluated || 20} mã cổ phiếu`;
-
-      const sNoteEl = document.getElementById('sb-note');
-      if (sNoteEl && fb.interpretation) {
-        sNoteEl.innerHTML = `💡 <em>Kết luận khoa học:</em> ${fb.interpretation}`;
+          return `
+            <tr class="${isEnsemble ? 'highlight-row' : ''}">
+              <td><strong>${m.model}</strong></td>
+              <td><span class="${parseFloat(accPct) >= 50 ? 'text-success' : ''}" style="font-weight:700;">${accPct}%</span></td>
+              <td><strong style="color: #a855f7;">${aucVal}</strong></td>
+              <td>${prec}</td>
+              <td>${rec}</td>
+              <td>${f1}</td>
+              <td>${samples}</td>
+            </tr>
+          `;
+        }).join('');
       }
     }
 
+    // 5-Fold CV
+    const cvList = document.getElementById('cv-folds-list');
+    if (cvList && res.xgboost_cv && res.xgboost_cv.folds) {
+      cvList.innerHTML = res.xgboost_cv.folds.map(f => `
+        <div class="cv-fold-item">
+          <span>Fold ${f.fold} (${f.test_period || ''}):</span>
+          <strong>${(f.accuracy * 100).toFixed(2)}%</strong>
+        </div>
+      `).join('');
+    }
   } catch (err) {
-    console.error('Lỗi tải dữ liệu MLOps Evaluation:', err);
+    console.error('Lỗi tải Model Evaluation:', err);
   }
-}
-
-// ==========================================================================
-// AUTO-REFRESH CONTROLLER
-// ==========================================================================
-let autoRefreshTimer = null;
-let autoRefreshMinutes = 5;
-
-function initAutoRefresh() {
-  const badge = document.getElementById('auto-refresh-badge');
-  if (!badge) return;
-
-  function setMode(mins) {
-    autoRefreshMinutes = mins;
-    if (autoRefreshTimer) clearInterval(autoRefreshTimer);
-
-    if (mins > 0) {
-      badge.textContent = `⏱️ Tự động: ${mins}p`;
-      badge.style.opacity = '1';
-      autoRefreshTimer = setInterval(() => {
-        console.log(`[Auto-Refresh] Tự động đồng bộ dữ liệu mỗi ${mins} phút...`);
-        loadAllData();
-      }, mins * 60 * 1000);
-    } else {
-      badge.textContent = `⏸️ Tự động: Tắt`;
-      badge.style.opacity = '0.6';
-    }
-  }
-
-  badge.addEventListener('click', () => {
-    if (autoRefreshMinutes === 5) {
-      setMode(1);
-    } else if (autoRefreshMinutes === 1) {
-      setMode(0);
-    } else {
-      setMode(5);
-    }
-  });
-
-  // Start with default 5 minutes
-  setMode(5);
 }

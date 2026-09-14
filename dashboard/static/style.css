@@ -1980,5 +1980,574 @@ body {
   margin-bottom: 12px;
 }
 
+/* ==========================================================================
+   SMART MARKET SCREENER & v6.0 ENHANCEMENTS
+   ========================================================================== */
+
+/* 1. Header Overview Badges */
+.highlight-chip {
+  background: rgba(99, 102, 241, 0.1) !important;
+  border-color: rgba(99, 102, 241, 0.25) !important;
+}
+
+.badge-count {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 7px;
+  border-radius: var(--radius-sm);
+  font-size: 11px;
+  font-weight: 700;
+  margin-right: 4px;
+}
+.badge-count.green { background: rgba(16, 185, 129, 0.15); color: #10B981; border: 1px solid rgba(16, 185, 129, 0.3); }
+.badge-count.yellow { background: rgba(245, 158, 11, 0.15); color: #F59E0B; border: 1px solid rgba(245, 158, 11, 0.3); }
+.badge-count.red { background: rgba(244, 63, 94, 0.15); color: #F43F5E; border: 1px solid rgba(244, 63, 94, 0.3); }
+
+.ticker-signal-chip {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 700;
+  margin-left: 6px;
+}
+.chip-green { background: rgba(16, 185, 129, 0.2); color: #34D399; }
+.chip-red { background: rgba(244, 63, 94, 0.2); color: #FB7185; }
+.chip-yellow { background: rgba(245, 158, 11, 0.2); color: #FBBF24; }
+
+/* 2. Main Nav Button Pills */
+.nav-pill-btn {
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--text-secondary);
+  padding: 8px 18px;
+  border-radius: var(--radius-pill);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  transition: all var(--transition-fast);
+  font-family: inherit;
+}
+.nav-pill-btn:hover {
+  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.05);
+}
+.nav-pill-btn.active {
+  background: linear-gradient(135deg, #6366F1, #4F46E5);
+  color: #FFFFFF;
+  box-shadow: 0 4px 15px rgba(99, 102, 241, 0.4);
+}
+
+/* 3. Top Opportunity Spotlight Banner */
+.screener-banner-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 20px;
+  background: linear-gradient(135deg, rgba(15, 23, 42, 0.95), rgba(30, 41, 59, 0.7));
+  border: 1px solid rgba(99, 102, 241, 0.25);
+  box-shadow: 0 8px 32px -8px rgba(99, 102, 241, 0.2);
+  padding: 24px;
+}
+
+.spotlight-circle {
+  width: 56px;
+  height: 56px;
+  border-radius: 16px;
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.25), rgba(16, 185, 129, 0.2));
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 26px;
+  flex-shrink: 0;
+}
+
+.banner-tag {
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  color: #38BDF8;
+  margin-bottom: 6px;
+}
+
+.banner-title {
+  font-family: var(--font-heading);
+  font-size: 20px;
+  font-weight: 700;
+  color: #F8FAFC;
+  margin-bottom: 6px;
+}
+
+.banner-desc {
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.6;
+  max-width: 950px;
+  margin-bottom: 18px;
+}
+
+.top-picks-container {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 16px;
+}
+
+.top-pick-card {
+  background: rgba(15, 23, 42, 0.7);
+  border: 1px solid rgba(16, 185, 129, 0.3);
+  border-radius: var(--radius-md);
+  padding: 14px 16px;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  position: relative;
+  overflow: hidden;
+}
+
+.top-pick-card:hover {
+  transform: translateY(-2px);
+  border-color: rgba(16, 185, 129, 0.7);
+  box-shadow: 0 8px 24px rgba(16, 185, 129, 0.18);
+  background: rgba(22, 32, 54, 0.85);
+}
+
+.pick-badge-rank {
+  font-size: 9px;
+  font-weight: 800;
+  color: #10B981;
+  letter-spacing: 0.06em;
+  margin-bottom: 4px;
+}
+
+.pick-top-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 2px;
+}
+
+.pick-ticker {
+  font-family: var(--font-heading);
+  font-size: 18px;
+  font-weight: 800;
+  color: #FFFFFF;
+}
+
+.pick-action {
+  font-size: 11px;
+  font-weight: 700;
+  background: rgba(16, 185, 129, 0.15);
+  color: #10B981;
+  padding: 2px 8px;
+  border-radius: 4px;
+  border: 1px solid rgba(16, 185, 129, 0.3);
+}
+
+.pick-action.strong {
+  background: rgba(16, 185, 129, 0.25);
+  color: #34D399;
+  border-color: #10B981;
+  box-shadow: 0 0 10px rgba(16, 185, 129, 0.3);
+}
+
+.pick-name {
+  font-size: 12px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-bottom: 10px;
+}
+
+.pick-metrics-row {
+  display: flex;
+  justify-content: space-between;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  padding-top: 8px;
+}
+
+.pick-metrics-row .m-lbl {
+  display: block;
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+.pick-metrics-row .m-val {
+  font-size: 12px;
+  font-family: 'JetBrains Mono', monospace;
+}
+
+/* 4. Screener Controls Toolbar */
+.screener-controls-card {
+  padding: 16px 20px;
+}
+
+.controls-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 12px;
+}
+
+.search-box {
+  position: relative;
+  display: flex;
+  align-items: center;
+  min-width: 320px;
+  flex: 1;
+  max-width: 480px;
+}
+
+.search-icon {
+  position: absolute;
+  left: 12px;
+  font-size: 14px;
+  color: var(--text-muted);
+  pointer-events: none;
+}
+
+.search-box input {
+  width: 100%;
+  background: rgba(15, 23, 42, 0.6);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: var(--radius-sm);
+  padding: 9px 36px 9px 34px;
+  color: var(--text-primary);
+  font-size: 13px;
+  font-family: inherit;
+  transition: all var(--transition-fast);
+}
+
+.search-box input:focus {
+  outline: none;
+  border-color: var(--accent-primary);
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.2);
+  background: rgba(15, 23, 42, 0.85);
+}
+
+.search-clear-btn {
+  position: absolute;
+  right: 10px;
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 18px;
+  cursor: pointer;
+  display: none;
+}
+
+.filter-chips-group, .sector-chips-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.filter-label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+  margin-right: 4px;
+}
+
+.filter-chip, .sector-chip {
+  background: rgba(30, 41, 59, 0.6);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+  padding: 6px 13px;
+  border-radius: var(--radius-pill);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  font-family: inherit;
+}
+
+.filter-chip:hover, .sector-chip:hover {
+  color: var(--text-primary);
+  background: rgba(51, 65, 85, 0.8);
+}
+
+.filter-chip.active, .sector-chip.active {
+  background: #3B82F6;
+  color: #FFFFFF;
+  border-color: #3B82F6;
+  box-shadow: 0 2px 8px rgba(59, 130, 246, 0.35);
+}
+
+.filter-chip.filter-buy.active {
+  background: #10B981;
+  border-color: #10B981;
+  box-shadow: 0 2px 8px rgba(16, 185, 129, 0.35);
+}
+
+.sector-chips-row {
+  padding-top: 10px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+/* 5. Screener Main Table */
+.screener-table-card {
+  padding: 0;
+  overflow: hidden;
+}
+
+.table-responsive {
+  width: 100%;
+  overflow-x: auto;
+}
+
+.screener-table {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: left;
+}
+
+.screener-table th {
+  background: rgba(15, 23, 42, 0.85);
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  padding: 14px 16px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  white-space: nowrap;
+}
+
+.screener-table td {
+  padding: 14px 16px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  font-size: 13px;
+  vertical-align: middle;
+}
+
+.screener-row {
+  cursor: pointer;
+  transition: background-color var(--transition-fast);
+}
+
+.screener-row:hover {
+  background-color: rgba(99, 102, 241, 0.08);
+}
+
+.screener-row.selected {
+  background-color: rgba(99, 102, 241, 0.16);
+  border-left: 3px solid var(--accent-primary);
+}
+
+.ticker-identity {
+  display: flex;
+  flex-direction: column;
+}
+
+.ticker-sym {
+  font-family: var(--font-heading);
+  font-size: 15px;
+  font-weight: 800;
+  color: #FFFFFF;
+}
+
+.ticker-corp {
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.sector-pill {
+  display: inline-block;
+  font-size: 11px;
+  color: #94A3B8;
+  background: rgba(30, 41, 59, 0.6);
+  padding: 3px 8px;
+  border-radius: 4px;
+}
+
+.ai-signal-badge {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 4px 10px;
+  border-radius: 4px;
+  white-space: nowrap;
+}
+
+.badge-strong-buy {
+  background: rgba(16, 185, 129, 0.25);
+  color: #34D399;
+  border: 1px solid #10B981;
+  box-shadow: 0 0 10px rgba(16, 185, 129, 0.25);
+}
+
+.badge-buy {
+  background: rgba(16, 185, 129, 0.15);
+  color: #10B981;
+  border: 1px solid rgba(16, 185, 129, 0.3);
+}
+
+.badge-hold {
+  background: rgba(245, 158, 11, 0.15);
+  color: #F59E0B;
+  border: 1px solid rgba(245, 158, 11, 0.3);
+}
+
+.badge-sell {
+  background: rgba(244, 63, 94, 0.15);
+  color: #F43F5E;
+  border: 1px solid rgba(244, 63, 94, 0.3);
+}
+
+.confidence-bar-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 110px;
+}
+
+.confidence-bar-track {
+  flex: 1;
+  height: 6px;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.confidence-bar-fill {
+  height: 100%;
+  border-radius: 3px;
+}
+.confidence-bar-fill.green { background: linear-gradient(90deg, #10B981, #34D399); }
+.confidence-bar-fill.yellow { background: linear-gradient(90deg, #F59E0B, #FBBF24); }
+.confidence-bar-fill.red { background: linear-gradient(90deg, #F43F5E, #FB7185); }
+
+.confidence-num {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  font-weight: 700;
+  width: 40px;
+}
+
+.sub-pct {
+  font-size: 11px;
+  margin-left: 2px;
+}
+
+.rr-badge {
+  display: inline-block;
+  padding: 2px 6px;
+  background: rgba(99, 102, 241, 0.15);
+  color: #A5B4FC;
+  border: 1px solid rgba(99, 102, 241, 0.3);
+  border-radius: 4px;
+  font-weight: 700;
+  font-size: 11px;
+}
+
+.btn-table-action {
+  background: rgba(99, 102, 241, 0.15);
+  border: 1px solid rgba(99, 102, 241, 0.3);
+  color: #A5B4FC;
+  padding: 6px 12px;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  white-space: nowrap;
+}
+
+.btn-table-action:hover {
+  background: var(--accent-primary);
+  color: #FFFFFF;
+  box-shadow: 0 2px 10px rgba(99, 102, 241, 0.4);
+}
+
+.table-footer-info {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 18px;
+  background: rgba(15, 23, 42, 0.5);
+  border-top: 1px solid rgba(255, 255, 255, 0.05);
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+/* 6. Chart Plan Summary Bar inside Header */
+.chart-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+
+.chart-plan-summary {
+  display: flex;
+  gap: 16px;
+  background: rgba(15, 23, 42, 0.6);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: var(--radius-md);
+  padding: 10px 16px;
+}
+
+.plan-mini-item {
+  display: flex;
+  flex-direction: column;
+}
+
+.plan-mini-item .p-label {
+  font-size: 9px;
+  font-weight: 800;
+  color: var(--text-muted);
+  letter-spacing: 0.05em;
+}
+
+.plan-mini-item .p-val {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 13px;
+}
+
+/* 7. Chart Legend Row */
+.chart-legend-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  padding: 8px 16px;
+  background: rgba(15, 23, 42, 0.4);
+  border-radius: 6px;
+  margin-bottom: 10px;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.legend-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+.legend-dot.green { background: #10B981; }
+.legend-dot.red { background: #F43F5E; }
+
+.legend-line {
+  display: inline-block;
+  width: 14px;
+  height: 2px;
+}
+.legend-line.orange { background: #F59E0B; }
+.legend-line.dashed-green { border-top: 2px dashed #10B981; }
+.legend-line.dashed-red { border-top: 2px dashed #F43F5E; }
+
+
 
 
