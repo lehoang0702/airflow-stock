@@ -24,10 +24,22 @@ from urllib.parse import urlparse, parse_qs
 from datetime import datetime
 import boto3
 import pandas as pd
+import urllib.parse
+import sys
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DAGS_DIR = os.path.abspath(os.path.join(BASE_DIR, "..", "dags"))
+for p in [DAGS_DIR, "/opt/airflow/dags", "/opt/airflow"]:
+    if p not in sys.path:
+        sys.path.insert(0, p)
+
+try:
+    from chart_utils import _render_ensemble_dual_chart, _render_single_ticker_dual_chart
+except ImportError:
+    from dags.chart_utils import _render_ensemble_dual_chart, _render_single_ticker_dual_chart
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 STATIC_DIR = os.path.join(BASE_DIR, "static")
 PORT = 8050
 
@@ -494,30 +506,82 @@ def get_ticker_chart(ticker: str):
             except Exception as e:
                 logging.warning(f"Error fetching candles for {ticker}: {e}")
 
-        # 2. Đọc tin tức FinBERT
-        news_key = get_latest_s3_key(s3, "finbert/finbert_news_20tickers_")
-        if news_key:
-            try:
-                df_n = read_s3_dataframe(s3, news_key)
-                ticker_col = 'ma_co_phieu' if 'ma_co_phieu' in df_n.columns else 'ticker'
-                title_col = 'tieu_de' if 'tieu_de' in df_n.columns else 'headline'
-                if ticker_col in df_n.columns and title_col in df_n.columns:
-                    sub_n = df_n[df_n[ticker_col] == ticker].tail(5)
-                    for _, r in sub_n.iterrows():
-                        news.append({
-                            "headline": str(r.get(title_col, '')),
-                            "source": str(r.get('nha_xuat_ban', r.get('nguon_tin', 'Market News'))),
-                            "date": str(r.get('thoi_gian_dang', ''))[:10]
-                        })
-            except Exception as e:
-                logging.warning(f"Error fetching news for {ticker}: {e}")
+        # 2. Thu thập tin tức thời gian thực kèm link bài báo gốc
+        try:
+            import yfinance as yf
+            stock_live = yf.Ticker(ticker)
+            raw_news = stock_live.news or []
+            for item in raw_news[:8]:
+                title = ""
+                if 'title' in item and item['title']:
+                    title = item['title'].strip()
+                if 'content' in item and isinstance(item['content'], dict):
+                    title = item['content'].get('title', '').strip() or title
 
-    # 3. Fallback cho các mã tìm kiếm mở rộng (như TSLA, META, AMD, T...): tải trực tiếp từ yfinance
+                content = item.get('content', {}) if isinstance(item.get('content'), dict) else {}
+                url = (
+                    content.get('canonicalUrl', {}).get('url')
+                    or content.get('clickThroughUrl', {}).get('url')
+                    or item.get('link')
+                )
+                publisher = (
+                    item.get('publisher')
+                    or content.get('provider', {}).get('displayName')
+                    or 'Yahoo Finance'
+                )
+                pub_time = item.get('providerPublishTime') or content.get('pubDate')
+                dt_str = datetime.now().strftime('%Y-%m-%d')
+                if pub_time:
+                    try:
+                        if isinstance(pub_time, (int, float)):
+                            dt_str = datetime.fromtimestamp(pub_time).strftime('%Y-%m-%d')
+                        else:
+                            dt_str = str(pub_time)[:10]
+                    except Exception:
+                        pass
+
+                if title:
+                    if not url:
+                        url = f"https://finance.yahoo.com/quote/{ticker}/news/"
+                    news.append({
+                        "headline": title,
+                        "source": publisher,
+                        "date": dt_str,
+                        "url": url
+                    })
+        except Exception as e:
+            logging.warning(f"Error fetching live yfinance news for {ticker}: {e}")
+
+        # Fallback đọc tin tức FinBERT từ MinIO nếu live news rỗng
+        if not news and s3:
+            news_key = get_latest_s3_key(s3, "finbert/finbert_news_20tickers_")
+            if news_key:
+                try:
+                    df_n = read_s3_dataframe(s3, news_key)
+                    ticker_col = 'ma_co_phieu' if 'ma_co_phieu' in df_n.columns else 'ticker'
+                    title_col = 'tieu_de' if 'tieu_de' in df_n.columns else 'headline'
+                    if ticker_col in df_n.columns and title_col in df_n.columns:
+                        sub_n = df_n[df_n[ticker_col] == ticker].tail(6)
+                        for _, r in sub_n.iterrows():
+                            art_title = str(r.get(title_col, ''))
+                            art_url = str(r.get('duong_dan', r.get('link', ''))).strip()
+                            if not art_url or not art_url.startswith('http'):
+                                art_url = f"https://www.google.com/search?q={urllib.parse.quote(art_title)}&tbm=nws"
+                            news.append({
+                                "headline": art_title,
+                                "source": str(r.get('nha_xuat_ban', r.get('nguon_tin', 'Market News'))),
+                                "date": str(r.get('thoi_gian_dang', ''))[:10],
+                                "url": art_url
+                            })
+                except Exception as e:
+                    logging.warning(f"Error fetching news for {ticker} from MinIO: {e}")
+
+    # 3. Fallback cho các mã tìm kiếm mở rộng (như TSLA, META, AMD, T...): tải nến trực tiếp từ yfinance
     if not candles:
         try:
             import yfinance as yf
             stock = yf.Ticker(ticker)
-            hist = stock.history(period="3mo")
+            hist = stock.history(period="6mo")
             if not hist.empty:
                 delta = hist['Close'].diff()
                 gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
@@ -526,7 +590,7 @@ def get_ticker_chart(ticker: str):
                 rsi_series = 100 - (100 / (1 + rs))
                 hist['rsi_14'] = rsi_series.fillna(50.0)
 
-                for dt, r in hist.tail(50).iterrows():
+                for dt, r in hist.tail(60).iterrows():
                     candles.append({
                         "date": dt.strftime("%Y-%m-%d"),
                         "open": round(float(r['Open']), 2),
@@ -538,18 +602,26 @@ def get_ticker_chart(ticker: str):
                     })
             if not news:
                 raw_news = stock.news or []
-                for item in raw_news[:5]:
+                for item in raw_news[:8]:
                     title = item.get('title')
                     if not title and 'content' in item:
                         title = item['content'].get('title', '')
-                    publisher = item.get('publisher') or (item.get('content', {}).get('provider', {}).get('displayName')) or 'Market News'
-                    pub_time = item.get('providerPublishTime')
-                    dt_str = datetime.fromtimestamp(pub_time).strftime('%Y-%m-%d') if pub_time else datetime.now().strftime('%Y-%m-%d')
+                    content = item.get('content', {}) if isinstance(item.get('content'), dict) else {}
+                    url = (
+                        content.get('canonicalUrl', {}).get('url')
+                        or content.get('clickThroughUrl', {}).get('url')
+                        or item.get('link')
+                        or f"https://finance.yahoo.com/quote/{ticker}/news/"
+                    )
+                    publisher = item.get('publisher') or (content.get('provider', {}).get('displayName')) or 'Market News'
+                    pub_time = item.get('providerPublishTime') or content.get('pubDate')
+                    dt_str = datetime.fromtimestamp(pub_time).strftime('%Y-%m-%d') if isinstance(pub_time, (int, float)) else datetime.now().strftime('%Y-%m-%d')
                     if title:
                         news.append({
                             "headline": title,
                             "source": publisher,
-                            "date": dt_str
+                            "date": dt_str,
+                            "url": url
                         })
         except Exception as e:
             logging.warning(f"Error fetching yfinance live data for {ticker}: {e}")
@@ -871,79 +943,134 @@ def get_evaluation_data():
 
 
 def generate_live_chart_image(ticker: str, model: str = "ensemble"):
-    """Tạo ảnh biểu đồ kỹ thuật chuẩn dark-theme khi MinIO chưa có ảnh."""
+    """
+    Tạo ảnh biểu đồ khung kép (Dual-Panel) chuẩn xác 100% đồng nhất với các mã core:
+    - Panel 1: Toàn cảnh lịch sử giá (2021 - Nay)
+    - Panel 2: Đối chiếu 4 đường dự báo 1 tuần (T+1 -> T+5) kèm dải ATR & các mốc +2 ngày, +4 ngày, +1 tuần.
+    Hỗ trợ đầy đủ cả 4 mô hình: ensemble, xgboost, lstm, finbert.
+    """
     try:
         import matplotlib
         matplotlib.use('Agg')
         import matplotlib.pyplot as plt
+        import yfinance as yf
 
-        meta = TICKERS_META.get(ticker) or EXTENDED_TICKERS_META.get(ticker) or {'name': ticker, 'sector': 'Thị trường Mỹ'}
-        name = meta.get('name', ticker)
+        ticker = ticker.strip().upper()
+        model = model.lower().strip()
+        if model not in ('ensemble', 'xgboost', 'lstm', 'finbert'):
+            model = 'ensemble'
 
-        # 1. Lấy candles từ cache tickers hoặc gọi get_ticker_chart
-        candles = []
-        cached_ticker = _CACHE['tickers'].get(ticker)
-        if cached_ticker and cached_ticker.get('data', {}).get('candles'):
-            candles = cached_ticker['data']['candles']
-        else:
+        # 1. Lấy dữ liệu phân tích on-demand (hoặc tính toán nếu chưa có trong cache)
+        pred_data = _ON_DEMAND_PREDICTIONS.get(ticker)
+        if not pred_data:
+            res_analysis = analyze_ticker_on_demand(ticker)
+            if res_analysis.get('status') == 'success':
+                pred_data = res_analysis.get('prediction', {})
+            else:
+                pred_data = {}
+
+        prob_xgb = float(pred_data.get('prob_xgb', 52.0))
+        prob_lstm = float(pred_data.get('prob_lstm', 50.0))
+        prob_bert = float(pred_data.get('prob_bert', 51.0))
+        prob_e = float(pred_data.get('prob_ensemble', 51.5))
+        sector = pred_data.get('sector', 'Công nghệ')
+
+        # 2. Lấy dữ liệu giá lịch sử 5 năm (từ 2021 đến nay) để vẽ Panel 1 Toàn Cảnh
+        df_hist = None
+        try:
+            tk = yf.Ticker(ticker)
+            df_hist = tk.history(period="5y")
+        except Exception as err:
+            logging.warning(f"Error fetching 5y history for {ticker}: {err}")
+
+        if df_hist is None or df_hist.empty:
+            try:
+                df_hist = yf.download(ticker, period="5y", progress=False)
+            except Exception as err:
+                logging.warning(f"Error downloading 5y for {ticker}: {err}")
+
+        if df_hist is None or df_hist.empty:
             t_chart = get_ticker_chart(ticker)
-            if t_chart and t_chart.get('candles'):
-                candles = t_chart['candles']
+            candles = t_chart.get('candles', []) if t_chart else []
+            if candles:
+                df_hist = pd.DataFrame(candles)
+                df_hist.rename(columns={'date': 'Date', 'close': 'Close'}, inplace=True)
 
-        fig, (ax1, ax2) = plt.subplots(
-            2, 1, figsize=(11, 6.5), dpi=100,
-            gridspec_kw={'height_ratios': [3, 1]},
-            facecolor='#0B1120'
-        )
-        ax1.set_facecolor('#0F172A')
-        ax2.set_facecolor('#0F172A')
+        if df_hist is None or df_hist.empty:
+            logging.warning(f"Cannot build dual chart for {ticker}: no price history found.")
+            return None
 
-        model_label_map = {
-            'ensemble': 'Báo Cáo Tổng Hợp (Master Ensemble)',
-            'xgboost': 'Mô Hình XGBoost (115+ Đặc Trưng Định Lượng)',
-            'lstm': 'Mô Hình Chuỗi Thời Gian LSTM (Deep Learning)',
-            'finbert': 'Mô Hình Cảm Xúc Tin Tức FinBERT NLP'
-        }
-        model_title = model_label_map.get(model.lower(), 'Báo Cáo Kỹ Thuật Live')
+        # Làm sạch DataFrame
+        df_clean = df_hist.reset_index()
+        date_col = 'Date' if 'Date' in df_clean.columns else ('Datetime' if 'Datetime' in df_clean.columns else df_clean.columns[0])
+        df_clean['Date'] = pd.to_datetime(df_clean[date_col])
+        if hasattr(df_clean['Date'].dt, 'tz_localize'):
+            try:
+                df_clean['Date'] = df_clean['Date'].dt.tz_localize(None)
+            except Exception:
+                try:
+                    df_clean['Date'] = df_clean['Date'].dt.tz_convert(None)
+                except Exception:
+                    pass
 
-        if candles:
-            df = pd.DataFrame(candles)
-            df['date'] = pd.to_datetime(df['date'])
-            df['MA20'] = df['close'].rolling(15, min_periods=1).mean()
-            last_price = float(df['close'].iloc[-1])
-            prev_price = float(df['close'].iloc[-2]) if len(df) > 1 else last_price
-            change_pct = ((last_price - prev_price) / prev_price) * 100
+        close_col = 'Close'
+        if isinstance(df_clean[close_col], pd.DataFrame):
+            df_clean['Close'] = df_clean[close_col].iloc[:, 0]
 
-            # Vẽ đường giá & MA20
-            ax1.plot(df['date'], df['close'], color='#6366F1', linewidth=2.2, label=f'Giá Đóng Cửa (${last_price:.2f})')
-            ax1.plot(df['date'], df['MA20'], color='#F59E0B', linewidth=1.5, linestyle='--', label='Đường MA20')
+        ticker_df = df_clean[['Date', 'Close']].sort_values('Date').dropna().copy()
+        ticker_df['Ticker'] = ticker
 
-            title_str = f"{ticker} — {name} | {model_title}\nGiá: ${last_price:.2f} ({change_pct:+.2f}%) | Dữ Liệu Thời Gian Thực"
-            ax1.set_title(title_str, color='#FFFFFF', fontsize=12, fontweight='bold', pad=10)
-            ax1.tick_params(colors='#94A3B8', labelsize=9)
-            ax1.grid(True, color='#1E293B', linestyle=':', alpha=0.8)
-            ax1.legend(loc='upper left', facecolor='#0B1120', edgecolor='#334155', labelcolor='#E2E8F0', fontsize=10)
+        # 3. Tạo figure chuẩn 18x7 inches (widescreen), phân bổ tỷ lệ 1 : 1.15
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(18, 7), gridspec_kw={'width_ratios': [1, 1.15]})
+        fig.patch.set_facecolor('#0d1117')
 
-            # Vẽ Khối lượng giao dịch
-            colors_vol = ['#10B981' if c >= o else '#EF4444' for o, c in zip(df['open'], df['close'])]
-            ax2.bar(df['date'], df['volume'], color=colors_vol, alpha=0.7, width=0.8)
-            ax2.set_ylabel('Khối Lượng', color='#94A3B8', fontsize=9)
-            ax2.tick_params(colors='#94A3B8', labelsize=8)
-            ax2.grid(True, color='#1E293B', linestyle=':', alpha=0.6)
+        today_str = datetime.now().strftime("%Y-%m-%d")
+
+        if model == 'ensemble':
+            ens_prob = prob_e / 100.0
+            rec = 'MUA' if prob_e >= 54.0 else ('BAN' if prob_e <= 46.0 else 'HOLD')
+            pred = {
+                'ma_co_phieu': ticker,
+                'prob_num': ens_prob,
+                'khuyen_nghi': rec,
+                'nhom_nganh': sector
+            }
+            xgb_probs = {ticker: prob_xgb / 100.0}
+            lstm_probs = {ticker: prob_lstm / 100.0}
+            bert_probs = {ticker: prob_bert / 100.0}
+
+            _render_ensemble_dual_chart(
+                fig, ax1, ax2, ticker, ticker_df, pred,
+                xgb_probs, lstm_probs, bert_probs,
+                today_str, prediction_days=5
+            )
         else:
-            # Fallback nếu chưa có candle nào
-            ax1.text(0.5, 0.5, f"Đang kết nối dữ liệu kỹ thuật cho {ticker}...\nVui lòng chuyển sang tab Biểu Đồ Nến Tương Tác", 
-                     color='#94A3B8', ha='center', va='center', fontsize=14)
-            ax1.set_title(f"{ticker} — {name} | {model_title}", color='#FFFFFF', fontsize=13, fontweight='bold', pad=12)
-            ax2.text(0.5, 0.5, "Chờ cập nhật khối lượng", color='#64748B', ha='center', va='center', fontsize=11)
+            model_name_map = {
+                'xgboost': ('XGBoost', prob_xgb),
+                'lstm': ('LSTM', prob_lstm),
+                'finbert': ('FinBERT', prob_bert)
+            }
+            m_name, m_prob = model_name_map.get(model, ('XGBoost', prob_xgb))
+            p_num = m_prob / 100.0
+            rec = 'MUA' if m_prob >= 53.0 else ('BAN' if m_prob <= 47.0 else 'HOLD')
+            pred = {
+                'ma_co_phieu': ticker,
+                'prob_num': p_num,
+                'khuyen_nghi': rec,
+                'nhom_nganh': sector
+            }
+            _render_single_ticker_dual_chart(
+                fig, ax1, ax2, ticker, ticker_df, pred,
+                m_name, today_str, prediction_days=5
+            )
 
-        plt.tight_layout()
+        plt.tight_layout(rect=[0, 0, 1, 0.94])
         buf = io.BytesIO()
-        plt.savefig(buf, format='png', facecolor=fig.get_facecolor(), edgecolor='none', bbox_inches='tight')
+        fig.savefig(buf, format='png', dpi=130, bbox_inches='tight', facecolor=fig.get_facecolor())
         plt.close(fig)
         return buf.getvalue()
     except Exception as e:
-        logging.warning(f"Error generating live chart image for {ticker}: {e}")
+        logging.exception(f"Lỗi tạo dual-panel live chart cho mã {ticker} ({model}): {e}")
         return None
 
 
@@ -951,13 +1078,13 @@ _CHART_CACHE = {}
 
 def get_chart_image(ticker: str, model: str = "ensemble"):
     """
-    Đọc ảnh PNG biểu đồ báo cáo khung kép từ MinIO.
-    Có cơ chế lọc bỏ ảnh rỗng (< 50KB) và tự động fallback sang ảnh chuẩn hoặc ảnh live matplotlib.
+    Đọc ảnh PNG biểu đồ báo cáo khung kép từ MinIO hoặc tự sinh Live Dual-Panel.
+    Bộ nhớ đệm 300s để hiển thị ngay tức thì.
     """
     cache_key = f"{ticker}_{model}"
     now_ts = time.time()
     cached = _CHART_CACHE.get(cache_key)
-    if cached and (now_ts - cached['time']) < 5:
+    if cached and (now_ts - cached['time']) < 300:
         return cached['data']
 
     s3 = get_s3_client()

@@ -28,16 +28,7 @@ except ImportError:
 try:
     from config_shared import SECTOR_MAP
 except ImportError:
-    SECTOR_MAP = {
-        'AAPL': 'Technology', 'MSFT': 'Technology', 'NVDA': 'Technology', 'GOOGL': 'Technology',
-        'AMZN': 'Consumer Discretionary', 'NKE': 'Consumer Discretionary', 'MCD': 'Consumer Discretionary',
-        'WMT': 'Consumer Staples', 'PG': 'Consumer Staples', 'KO': 'Consumer Staples',
-        'JPM': 'Financials', 'V': 'Financials',
-        'UNH': 'Healthcare', 'JNJ': 'Healthcare',
-        'CAT': 'Industrials', 'BA': 'Industrials',
-        'XOM': 'Energy', 'CVX': 'Energy',
-        'NEE': 'Utilities', 'LIN': 'Materials'
-    }
+    from dags.config_shared import SECTOR_MAP
 
 COLUMNS_9 = [
     'ngay_du_bao', 'ma_co_phieu', 'nhom_nganh', 'khuyen_nghi',
@@ -69,7 +60,7 @@ def train_and_predict_xgboost_task(**context):
 
     data_key = None
     df = None
-    for k in reversed(sorted(keys)):
+    for k in reversed(sorted([key for key in keys if key.endswith('.csv')])):
         try:
             raw_csv = s3_hook.read_key(k, bucket_name=BUCKET_NAME)
             temp_df = pd.read_csv(io.StringIO(raw_csv))
@@ -97,7 +88,10 @@ def train_and_predict_xgboost_task(**context):
 
     # Target
     close_col = cols_lower.get('close') or cols_lower.get('adj close')
-    if close_col:
+    target_col = cols_lower.get('future_direction_1d') or cols_lower.get('target')
+    if target_col:
+        df['Target_Std'] = df[target_col].astype(int)
+    elif close_col:
         df['Target_Std'] = (df.groupby('Ticker_Std')[close_col].shift(-1) > df[close_col]).astype(int)
     else:
         df['Target_Std'] = (df.index % 2 == 0).astype(int)
@@ -136,17 +130,34 @@ def train_and_predict_xgboost_task(**context):
             'random_state': 42, 'n_jobs': -1, 'eval_metric': 'logloss'
         }
 
-    model = xgb.XGBClassifier(**tuned_params)
-    model.fit(X_train, y_train)
+    import mlflow
+    import mlflow.xgboost
+    import os
 
-    # Đánh giá Test set — METRICS THỰC SỰ (không clip)
-    test_preds_prob = model.predict_proba(X_test)[:, 1]
-    test_preds_bin = (test_preds_prob >= 0.5).astype(int)
-    test_acc = float(accuracy_score(y_test, test_preds_bin))
-    try:
-        test_auc = float(roc_auc_score(y_test, test_preds_prob))
-    except Exception:
-        test_auc = 0.5
+    os.environ["AWS_ACCESS_KEY_ID"] = "minioadmin"
+    os.environ["AWS_SECRET_ACCESS_KEY"] = "minioadmin"
+    os.environ["MLFLOW_S3_ENDPOINT_URL"] = "http://minio:9000"
+    
+    mlflow.set_tracking_uri("http://mlflow-server:5000")
+    mlflow.set_experiment("Quantum_XGBoost")
+
+    with mlflow.start_run(run_name=f"XGBoost_{date_nodash}"):
+        mlflow.log_params(tuned_params)
+        
+        model = xgb.XGBClassifier(**tuned_params)
+        model.fit(X_train, y_train)
+
+        # Đánh giá Test set — METRICS THỰC SỰ (không clip)
+        test_preds_prob = model.predict_proba(X_test)[:, 1]
+        test_preds_bin = (test_preds_prob >= 0.5).astype(int)
+        test_acc = float(accuracy_score(y_test, test_preds_bin))
+        try:
+            test_auc = float(roc_auc_score(y_test, test_preds_prob))
+        except Exception:
+            test_auc = 0.5
+            
+        mlflow.log_metrics({"accuracy": test_acc, "auc": test_auc})
+        mlflow.xgboost.log_model(model, "model", input_example=X_train.iloc[:1])
 
     # Lưu model artifact lên MinIO
     try:

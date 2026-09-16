@@ -55,6 +55,7 @@ def fetch_rss_news(ticker):
                 title = item.find('title').text if item.find('title') is not None else ''
                 desc = item.find('description').text if item.find('description') is not None else ''
                 pub_date = item.find('pubDate').text if item.find('pubDate') is not None else ''
+                link = item.find('link').text if item.find('link') is not None else ''
                 if title:
                     # Làm sạch HTML tag cơ bản trong description
                     import re
@@ -63,7 +64,8 @@ def fetch_rss_news(ticker):
                         'title': title,
                         'summary': clean_desc[:300],
                         'publisher': 'Google News RSS',
-                        'pub_date': pub_date
+                        'pub_date': pub_date,
+                        'link': link or f"https://news.google.com/search?q={ticker}+stock"
                     })
     except Exception as e:
         logging.warning(f"⚠️ Google News RSS thất bại cho {ticker}: {str(e)}")
@@ -77,12 +79,14 @@ def fetch_rss_news(ticker):
             for item in tree.findall('.//item'):
                 title = item.find('title').text if item.find('title') is not None else ''
                 desc = item.find('description').text if item.find('description') is not None else ''
+                link = item.find('link').text if item.find('link') is not None else ''
                 if ticker.lower() in title.lower() or ticker.lower() in desc.lower():
                     articles.append({
                         'title': title,
                         'summary': desc[:300],
                         'publisher': 'CNBC RSS',
-                        'pub_date': datetime.now().strftime("%Y-%m-%d")
+                        'pub_date': datetime.now().strftime("%Y-%m-%d"),
+                        'link': link or "https://www.cnbc.com/finance/"
                     })
                     if len(articles) >= 15:
                         break
@@ -122,17 +126,26 @@ def crawl_news_task(**context):
                     summary = item['content'].get('summary', '').strip() or summary
 
                 publisher = item.get('publisher', 'Yahoo Finance')
+                content_obj = item.get('content', {}) if isinstance(item.get('content'), dict) else {}
                 if 'content' in item and isinstance(item['content'], dict):
                     provider = item['content'].get('provider', {})
                     if isinstance(provider, dict) and 'displayName' in provider:
                         publisher = provider['displayName']
+
+                link = (
+                    content_obj.get('canonicalUrl', {}).get('url')
+                    or content_obj.get('clickThroughUrl', {}).get('url')
+                    or item.get('link')
+                    or f"https://finance.yahoo.com/quote/{ticker}/news/"
+                )
 
                 if title:
                     articles_found.append({
                         'title': title,
                         'summary': summary[:300],
                         'publisher': publisher,
-                        'pub_date': today_str
+                        'pub_date': today_str,
+                        'link': link
                     })
         except Exception as e:
             logging.warning(f"⚠️ Lỗi yfinance mã {ticker}: {str(e)}")
@@ -154,7 +167,8 @@ def crawl_news_task(**context):
                     'tieu_de': art['title'],
                     'tom_tat': art.get('summary', ''),
                     'nha_xuat_ban': art['publisher'],
-                    'thoi_gian_dang': art['pub_date']
+                    'thoi_gian_dang': art['pub_date'],
+                    'duong_dan': art.get('link', f"https://finance.yahoo.com/quote/{ticker}/news/")
                 })
             logging.info(f"✅ {ticker}: Đã thu thập thành công {len(articles_found)} bài báo.")
         else:

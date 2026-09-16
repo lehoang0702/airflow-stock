@@ -33,16 +33,7 @@ except ImportError:
 try:
     from config_shared import SECTOR_MAP
 except ImportError:
-    SECTOR_MAP = {
-        'AAPL': 'Technology', 'MSFT': 'Technology', 'NVDA': 'Technology', 'GOOGL': 'Technology',
-        'AMZN': 'Consumer Discretionary', 'NKE': 'Consumer Discretionary', 'MCD': 'Consumer Discretionary',
-        'WMT': 'Consumer Staples', 'PG': 'Consumer Staples', 'KO': 'Consumer Staples',
-        'JPM': 'Financials', 'V': 'Financials',
-        'UNH': 'Healthcare', 'JNJ': 'Healthcare',
-        'CAT': 'Industrials', 'BA': 'Industrials',
-        'XOM': 'Energy', 'CVX': 'Energy',
-        'NEE': 'Utilities', 'LIN': 'Materials'
-    }
+    from dags.config_shared import SECTOR_MAP
 
 default_args = {
     'owner': 'quant_team',
@@ -79,7 +70,7 @@ def train_and_predict_lstm_task(**context):
 
     data_key = None
     df = None
-    for k in reversed(sorted(keys)):
+    for k in reversed(sorted([key for key in keys if key.endswith('.csv')])):
         try:
             raw_csv = s3_hook.read_key(k, bucket_name=BUCKET_NAME)
             temp_df = pd.read_csv(io.StringIO(raw_csv))
@@ -107,7 +98,10 @@ def train_and_predict_lstm_task(**context):
 
     # Target
     close_col = cols_lower.get('close') or cols_lower.get('adj close')
-    if close_col:
+    target_col = cols_lower.get('future_direction_1d') or cols_lower.get('target')
+    if target_col:
+        df['Target_Std'] = df[target_col].astype(float)
+    elif close_col:
         df['Target_Std'] = (df.groupby('Ticker_Std')[close_col].shift(-1) > df[close_col]).astype(float)
     else:
         df['Target_Std'] = (df.index % 2 == 0).astype(float)
@@ -180,31 +174,55 @@ def train_and_predict_lstm_task(**context):
         shuffle=True
     )
 
-    logging.info("🚀 Đang huấn luyện Calibrated LSTM (15 Epochs)...")
-    model.train()
-    for epoch in range(15):
-        for bx, by in train_loader:
-            optimizer.zero_grad()
-            logits = model(bx)
-            loss = criterion(logits, by)
-            loss.backward()
-            optimizer.step()
-        time.sleep(0.01)
+    import mlflow
+    import mlflow.pytorch
+    import os
 
-    # 4. Đánh giá Test Set — METRICS THỰC SỰ (không clip)
-    model.eval()
-    with torch.no_grad():
-        if len(X_test) > 0:
-            test_logits = model(torch.tensor(X_test)).numpy()
-            test_preds_prob = 1.0 / (1.0 + np.exp(-test_logits / 2.0))
-            test_preds_bin = (test_preds_prob >= 0.5).astype(int)
-            test_acc = float(accuracy_score(y_test, test_preds_bin))
-            try:
-                test_auc = float(roc_auc_score(y_test, test_preds_prob))
-            except Exception:
-                test_auc = 0.5
-        else:
-            test_acc, test_auc = 0.5, 0.5
+    os.environ["AWS_ACCESS_KEY_ID"] = "minioadmin"
+    os.environ["AWS_SECRET_ACCESS_KEY"] = "minioadmin"
+    os.environ["MLFLOW_S3_ENDPOINT_URL"] = "http://minio:9000"
+    
+    mlflow.set_tracking_uri("http://mlflow-server:5000")
+    mlflow.set_experiment("Quantum_LSTM")
+
+    with mlflow.start_run(run_name=f"LSTM_{date_nodash}"):
+        mlflow.log_params({
+            "hidden_dim": 48,
+            "num_layers": 2,
+            "dropout": 0.2,
+            "lr": 0.0015,
+            "epochs": 15,
+            "batch_size": 128
+        })
+        
+        logging.info("🚀 Đang huấn luyện Calibrated LSTM (15 Epochs)...")
+        model.train()
+        for epoch in range(15):
+            for bx, by in train_loader:
+                optimizer.zero_grad()
+                logits = model(bx)
+                loss = criterion(logits, by)
+                loss.backward()
+                optimizer.step()
+            time.sleep(0.01)
+
+        # 4. Đánh giá Test Set — METRICS THỰC SỰ (không clip)
+        model.eval()
+        with torch.no_grad():
+            if len(X_test) > 0:
+                test_logits = model(torch.tensor(X_test)).numpy()
+                test_preds_prob = 1.0 / (1.0 + np.exp(-test_logits / 2.0))
+                test_preds_bin = (test_preds_prob >= 0.5).astype(int)
+                test_acc = float(accuracy_score(y_test, test_preds_bin))
+                try:
+                    test_auc = float(roc_auc_score(y_test, test_preds_prob))
+                except Exception:
+                    test_auc = 0.5
+            else:
+                test_acc, test_auc = 0.5, 0.5
+                
+        mlflow.log_metrics({"accuracy": test_acc, "auc": test_auc})
+        mlflow.pytorch.log_model(model, "model", input_example=X_train[:1])
 
     # Lưu model artifact lên MinIO
     try:
