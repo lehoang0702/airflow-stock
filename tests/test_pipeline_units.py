@@ -83,13 +83,14 @@ class TestDataValidator(unittest.TestCase):
         import pandas as pd
         import numpy as np
         from data_validator import validate_xgboost_dataset
+        base_price = np.random.uniform(150, 200, 100)
         df = pd.DataFrame({
             'Date': pd.date_range('2024-01-01', periods=100),
             'Ticker': ['AAPL'] * 100,
-            'Open': np.random.uniform(150, 200, 100),
-            'High': np.random.uniform(150, 200, 100),
-            'Low': np.random.uniform(150, 200, 100),
-            'Close': np.random.uniform(150, 200, 100),
+            'Open': base_price,
+            'High': base_price + 5.0,
+            'Low': base_price - 5.0,
+            'Close': base_price,
             'Volume': np.random.randint(1_000_000, 10_000_000, 100),
         })
         qa = validate_xgboost_dataset(df)
