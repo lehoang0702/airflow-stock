@@ -50,4 +50,5 @@ jobs:
 
       - name: 🐳 Validate Docker Compose Architecture
         run: |
+          cp .env.example .env 2>/dev/null || touch .env
           docker compose config --quiet
