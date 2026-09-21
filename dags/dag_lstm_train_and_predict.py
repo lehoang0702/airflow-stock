@@ -113,12 +113,15 @@ def train_and_predict_lstm_task(**context):
     else:
         df['Target_Std'] = (df.index % 2 == 0).astype(float)
 
-    # LỌC BỎ CỘT GIÁ THÔ (CLOSE, OPEN, HIGH, LOW) ĐỂ TRÁNH BULLISH BIAS
-    raw_price_keywords = ['close', 'open', 'high', 'low', 'adj close', 'volume', 'date', 'ticker', 'symbol', 'sector', 'target']
+    # LỌC BỎ CỘT GIÁ THÔ VÀ FUTURE TARGET ĐỂ TRÁNH RÒ RỈ DỮ LIỆU
+    raw_price_keywords = ['close', 'open', 'high', 'low', 'adj close', 'volume', 'date', 'ticker', 'symbol', 'sector', 'target', 'split_set']
     feature_cols = []
     for c in df.columns:
         c_low = c.lower()
-        if not any(k == c_low for k in raw_price_keywords) and 'target' not in c_low and c not in ['Date_Std', 'Ticker_Std', 'Sector_Std', 'Target_Std']:
+        if (not any(k == c_low for k in raw_price_keywords) 
+                and 'target' not in c_low 
+                and not c_low.startswith('future')
+                and c not in ['Date_Std', 'Ticker_Std', 'Sector_Std', 'Target_Std']):
             df[c] = pd.to_numeric(df[c], errors='coerce')
             if np.issubdtype(df[c].dtype, np.number):
                 feature_cols.append(c)

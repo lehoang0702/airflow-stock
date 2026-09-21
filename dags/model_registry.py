@@ -113,17 +113,20 @@ class XGBoostModelBuilder:
         else:
             df['Target_Std'] = (df.index % 2 == 0).astype(int)
 
-        # Lọc features (loại bỏ data leakage)
-        leakage_keywords = [
-            'target', 'label', 'unnamed', 'index', 'level', 'future',
-            'date', 'symbol', 'ticker', 'sector', 'close', 'open',
-            'high', 'low', 'adj close'
-        ]
-        feature_cols = [
-            c for c in df.columns
-            if c.lower() not in leakage_keywords
-            and c not in ['Date_Std', 'Ticker_Std', 'Sector_Std', 'Target_Std']
-        ]
+        # Lọc features (loại bỏ triệt để data leakage và future columns)
+        def is_leakage_col(col_name: str) -> bool:
+            c = col_name.lower()
+            if c in ['date_std', 'ticker_std', 'sector_std', 'target_std', 'split_set']:
+                return True
+            if any(c.startswith(p) for p in ['future', 'target', 'label']):
+                return True
+            if c in ['open', 'high', 'low', 'close', 'adj close', 'volume', 'symbol', 'ticker', 'date', 'datetime', 'sector']:
+                return True
+            if 'unnamed' in c:
+                return True
+            return False
+
+        feature_cols = [c for c in df.columns if not is_leakage_col(c)]
 
         for c in feature_cols:
             df[c] = pd.to_numeric(df[c], errors='coerce')
