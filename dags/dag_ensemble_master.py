@@ -37,16 +37,7 @@ default_args = {
 try:
     from config_shared import SECTOR_MAP
 except ImportError:
-    SECTOR_MAP = {
-        'AAPL': 'Technology', 'MSFT': 'Technology', 'NVDA': 'Technology', 'GOOGL': 'Technology',
-        'AMZN': 'Consumer Discretionary', 'NKE': 'Consumer Discretionary', 'MCD': 'Consumer Discretionary',
-        'WMT': 'Consumer Staples', 'PG': 'Consumer Staples', 'KO': 'Consumer Staples',
-        'JPM': 'Financials', 'V': 'Financials',
-        'UNH': 'Healthcare', 'JNJ': 'Healthcare',
-        'CAT': 'Industrials', 'BA': 'Industrials',
-        'XOM': 'Energy', 'CVX': 'Energy',
-        'NEE': 'Utilities', 'LIN': 'Materials'
-    }
+    from dags.config_shared import SECTOR_MAP
 
 def compare_and_ensemble_task(**context):
     s3_hook = S3Hook(aws_conn_id=MINIO_CONN_ID)

@@ -9,57 +9,14 @@ from airflow import DAG
 from airflow.operators.python import PythonOperator
 from airflow.providers.amazon.aws.hooks.s3 import S3Hook
 
-# --- 20 MÃ CỔ PHIẾU THEO 9 NHÓM NGÀNH ---
-TICKERS = {
-    # 1. Công nghệ (Technology)
-    'AAPL': {'name': 'Apple', 'sector': 'Technology'},
-    'MSFT': {'name': 'Microsoft', 'sector': 'Technology'},
-    'NVDA': {'name': 'NVIDIA', 'sector': 'Technology'},
-    'GOOGL': {'name': 'Alphabet', 'sector': 'Technology'},
-    
-    # 2. Tài chính (Financials)
-    'JPM': {'name': 'JPMorgan Chase', 'sector': 'Financials'},
-    'V': {'name': 'Visa', 'sector': 'Financials'},
-    
-    # 3. Y tế (Healthcare)
-    'JNJ': {'name': 'Johnson & Johnson', 'sector': 'Healthcare'},
-    'UNH': {'name': 'UnitedHealth Group', 'sector': 'Healthcare'},
-    
-    # 4. Năng lượng (Energy)
-    'XOM': {'name': 'ExxonMobil', 'sector': 'Energy'},
-    'CVX': {'name': 'Chevron', 'sector': 'Energy'},
-    
-    # 5. Tiêu dùng thiết yếu (Consumer Staples)
-    'PG': {'name': 'Procter & Gamble', 'sector': 'Consumer Staples'},
-    'KO': {'name': 'Coca-Cola', 'sector': 'Consumer Staples'},
-    'WMT': {'name': 'Walmart', 'sector': 'Consumer Staples'},
-    
-    # 6. Tiêu dùng không thiết yếu (Consumer Discretionary)
-    'AMZN': {'name': 'Amazon', 'sector': 'Consumer Discretionary'},
-    'MCD': {'name': "McDonald's", 'sector': 'Consumer Discretionary'},
-    'NKE': {'name': 'Nike', 'sector': 'Consumer Discretionary'},
-    
-    # 7. Công nghiệp (Industrials)
-    'CAT': {'name': 'Caterpillar', 'sector': 'Industrials'},
-    'BA': {'name': 'Boeing', 'sector': 'Industrials'},
-    
-    # 8. Tiện ích (Utilities)
-    'NEE': {'name': 'NextEra Energy', 'sector': 'Utilities'},
-    
-    # 9. Vật liệu (Materials)
-    'LIN': {'name': 'Linde', 'sector': 'Materials'}
-}
+try:
+    from config_shared import SECTOR_MAP, TICKERS_META, MACRO_TICKERS
+except ImportError:
+    from dags.config_shared import SECTOR_MAP, TICKERS_META, MACRO_TICKERS
 
-# Macro & Inter-Market Benchmarks
-MACRO_TICKERS = {
-    'SPY': 'spy',      # S&P 500 ETF
-    'QQQ': 'qqq',      # Nasdaq 100 ETF
-    '^VIX': 'vix',     # CBOE Volatility Index
-    '^TNX': 'tnx',     # 10Y US Treasury Yield
-    'GC=F': 'gold',    # Gold Futures (Tài sản trú ẩn an toàn)
-    'CL=F': 'oil',     # WTI Crude Oil (Năng lượng & Lạm phát)
-    'DX-Y.NYB': 'dxy', # US Dollar Index (Sức mạnh USD)
-    'HYG': 'hyg'       # iShares High Yield Corporate Bond (Tín dụng & Rủi ro)
+TICKERS = {
+    k: {'name': TICKERS_META.get(k, {}).get('name', k), 'sector': SECTOR_MAP.get(k, 'Unknown')}
+    for k in SECTOR_MAP.keys()
 }
 
 MINIO_CONN_ID = 'minio_conn'
@@ -336,8 +293,11 @@ def crawl_process_and_upload_to_minio(**kwargs):
     combined_df['future_return_5d'] = combined_df.groupby('symbol')['log_return'].shift(-5)
     combined_df['future_direction_5d'] = (combined_df['future_return_5d'] > 0).astype(int)
 
-    # Loại bỏ dòng NaN
-    clean_df_final = combined_df.dropna().reset_index(drop=True)
+    # Bỏ NA ở Features nhưng GIỮ LẠI dòng cuối để dự báo (fill target NaN)
+    target_cols = ['future_return_1d', 'future_direction_1d', 'future_return_5d', 'future_direction_5d']
+    feat_cols = [c for c in combined_df.columns if c not in target_cols]
+    clean_df_final = combined_df.dropna(subset=feat_cols).reset_index(drop=True)
+    clean_df_final[target_cols] = clean_df_final[target_cols].ffill().bfill().fillna(0)
 
     print("=== 4. TIME-BASED SPLIT VÀ BỎ GIÁ THÔ KHỎI X ===")
     # Phân chia tập dữ liệu

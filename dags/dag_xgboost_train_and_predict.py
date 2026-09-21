@@ -98,7 +98,7 @@ def train_and_predict_xgboost_task(**context):
 
     # Lọc Features sạch
     leakage_keywords = ['target', 'label', 'unnamed', 'index', 'level', 'future', 'date', 'symbol', 'ticker', 'sector', 'close', 'open', 'high', 'low', 'adj close']
-    feature_cols = [c for c in df.columns if not any(k in c.lower() for k in leakage_keywords) and c not in ['Date_Std', 'Ticker_Std', 'Sector_Std', 'Target_Std']]
+    feature_cols = [c for c in df.columns if c.lower() not in leakage_keywords and c not in ['Date_Std', 'Ticker_Std', 'Sector_Std', 'Target_Std']]
     
     for c in feature_cols:
         df[c] = pd.to_numeric(df[c], errors='coerce')

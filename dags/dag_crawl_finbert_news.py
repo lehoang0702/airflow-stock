@@ -17,16 +17,10 @@ from airflow.providers.amazon.aws.hooks.s3 import S3Hook
 MINIO_CONN_ID = 'minio_conn'
 BUCKET_NAME = 'stock-xgboost-data'
 
-SECTOR_MAP = {
-    'AAPL': 'Technology', 'MSFT': 'Technology', 'NVDA': 'Technology', 'GOOGL': 'Technology',
-    'AMZN': 'Consumer Discretionary', 'NKE': 'Consumer Discretionary', 'MCD': 'Consumer Discretionary',
-    'WMT': 'Consumer Staples', 'PG': 'Consumer Staples', 'KO': 'Consumer Staples',
-    'JPM': 'Financials', 'V': 'Financials',
-    'UNH': 'Healthcare', 'JNJ': 'Healthcare',
-    'CAT': 'Industrials', 'BA': 'Industrials',
-    'XOM': 'Energy', 'CVX': 'Energy',
-    'NEE': 'Utilities', 'LIN': 'Materials'
-}
+try:
+    from config_shared import SECTOR_MAP
+except ImportError:
+    from dags.config_shared import SECTOR_MAP
 
 try:
     from alert_utils import telegram_failure_callback
@@ -218,7 +212,7 @@ def crawl_news_task(**context):
     try:
         from data_validator import validate_finbert_dataset, save_and_alert_quality_report
         qa_df = df_news.rename(columns={'ma_co_phieu': 'ticker', 'tieu_de': 'headline'})
-        qa_result = validate_finbert_dataset(qa_df, expected_tickers=list(SECTORS.keys()))
+        qa_result = validate_finbert_dataset(qa_df, expected_tickers=list(SECTOR_MAP.keys()))
         save_and_alert_quality_report(qa_result, s3_hook, BUCKET_NAME, date_nodash)
     except Exception as qa_err:
         logging.warning(f"⚠️ Không thể chạy QA validation FinBERT: {qa_err}")

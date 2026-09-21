@@ -17,23 +17,12 @@ from airflow.providers.amazon.aws.hooks.s3 import S3Hook
 MINIO_CONN_ID = 'minio_conn'
 BUCKET_NAME = 'stock-xgboost-data'
 
-TICKERS_20 = [
-    'NKE', 'AMZN', 'GOOGL', 'AAPL', 'MSFT', 'WMT', 'V', 'UNH', 'PG', 'NVDA',
-    'NEE', 'MCD', 'LIN', 'KO', 'JPM', 'CAT', 'BA', 'XOM', 'JNJ', 'CVX'
-]
-
-MACRO_TICKERS = ['SPY', 'QQQ', '^VIX', '^TNX', 'GC=F', 'CL=F', 'DX-Y.NYB']
-
-SECTOR_MAP = {
-    'AAPL': 'Technology', 'MSFT': 'Technology', 'NVDA': 'Technology', 'GOOGL': 'Technology',
-    'AMZN': 'Consumer Discretionary', 'NKE': 'Consumer Discretionary', 'MCD': 'Consumer Discretionary',
-    'WMT': 'Consumer Staples', 'PG': 'Consumer Staples', 'KO': 'Consumer Staples',
-    'JPM': 'Financials', 'V': 'Financials',
-    'UNH': 'Healthcare', 'JNJ': 'Healthcare',
-    'CAT': 'Industrials', 'BA': 'Industrials',
-    'XOM': 'Energy', 'CVX': 'Energy',
-    'NEE': 'Utilities', 'LIN': 'Materials'
-}
+try:
+    from config_shared import TICKERS_LIST as TICKERS_20, MACRO_TICKERS as MACRO_DICT, SECTOR_MAP
+    MACRO_TICKERS = list(MACRO_DICT.keys())
+except ImportError:
+    from dags.config_shared import TICKERS_LIST as TICKERS_20, MACRO_TICKERS as MACRO_DICT, SECTOR_MAP
+    MACRO_TICKERS = list(MACRO_DICT.keys())
 
 try:
     from alert_utils import telegram_failure_callback
@@ -53,6 +42,7 @@ def calculate_technical_features(df):
     """Tính toán 25+ chỉ số kỹ thuật động lượng cho LSTM"""
     df = df.copy()
     close = df['Close']
+    open_p = df['Open']
     high = df['High']
     low = df['Low']
     vol = df['Volume']
@@ -89,8 +79,13 @@ def calculate_technical_features(df):
     df['bb_width'] = (4 * std20) / (ma20 + 1e-9)
 
     # Volatility & Volume
+    df['volatility_10'] = df['log_ret'].rolling(10).std()
     df['volatility_20'] = df['log_ret'].rolling(20).std()
     df['vol_sma_ratio'] = vol / (vol.rolling(20).mean() + 1e-9)
+    
+    # Biến động nến
+    df['hl_spread'] = (high - low) / close
+    df['co_spread'] = (close - open_p) / close
 
     # Target: 1 nếu ngày mai tăng, 0 nếu giảm
     df['Target'] = (close.shift(-1) > close).astype(float)

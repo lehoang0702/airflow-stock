@@ -5,11 +5,20 @@ services:
   postgres:
     image: postgres:13
     environment:
-      - POSTGRES_USER=airflow
-      - POSTGRES_PASSWORD=airflow
-      - POSTGRES_DB=airflow
+      - POSTGRES_USER=${POSTGRES_USER:-airflow}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-airflow}
+      - POSTGRES_DB=${POSTGRES_DB:-airflow}
+      - POSTGRES_MULTIPLE_DATABASES=mlflow
+    ports:
+      - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+      - ./init-multi-db.sh:/docker-entrypoint-initdb.d/init-multi-db.sh:z
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-airflow}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
     restart: always
 
   # 2. MinIO (Lưu trữ file và Web UI xem file)
@@ -17,13 +26,18 @@ services:
     image: minio/minio:latest
     command: server /data --console-address ":9001"
     environment:
-      MINIO_ROOT_USER: minioadmin
-      MINIO_ROOT_PASSWORD: minioadmin
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
     ports:
       - "9000:9000"   # API S3
       - "9001:9001"   # Giao diện Web MinIO
     volumes:
       - ./minio_data:/data:z
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
     restart: always
 
   # 3. Khởi tạo DB & tạo tài khoản admin cho Airflow
@@ -32,14 +46,15 @@ services:
     build: .
     user: "${AIRFLOW_UID:-50000}:0"
     depends_on:
-      - postgres
+      postgres:
+        condition: service_healthy
     environment:
       - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres/airflow
       - _AIRFLOW_DB_UPGRADE=true
       - _AIRFLOW_WWW_USER_CREATE=true
       - _AIRFLOW_WWW_USER_USERNAME=admin
       - _AIRFLOW_WWW_USER_PASSWORD=admin
-    command: bash -c "airflow db migrate && airflow users create --username admin --password admin --firstname Admin --lastname User --role Admin --email admin@example.com || true"
+    command: bash -c "airflow db migrate && airflow users create --username $${AIRFLOW_ADMIN_USER:-admin} --password $${AIRFLOW_ADMIN_PASSWORD:-admin} --firstname Admin --lastname User --role Admin --email admin@example.com || true"
 
   # 4. Airflow Webserver (Giao diện điều khiển Airflow)
   airflow-webserver:
@@ -55,7 +70,9 @@ services:
       - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres/airflow
       - AIRFLOW__CORE__EXECUTOR=LocalExecutor
       - AIRFLOW__CORE__LOAD_EXAMPLES=false
-      - AIRFLOW__WEBSERVER__SECRET_KEY=secret_key_fedora_12345
+      - AIRFLOW__WEBSERVER__SECRET_KEY=${AIRFLOW_SECRET_KEY:-secret_key_fedora_12345}
+    env_file:
+      - .env
     volumes:
       - ./dags:/opt/airflow/dags:z
       - ./logs:/opt/airflow/logs:z
@@ -74,6 +91,8 @@ services:
       - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres/airflow
       - AIRFLOW__CORE__EXECUTOR=LocalExecutor
       - AIRFLOW__CORE__LOAD_EXAMPLES=false
+    env_file:
+      - .env
     volumes:
       - ./dags:/opt/airflow/dags:z
       - ./logs:/opt/airflow/logs:z
@@ -89,10 +108,38 @@ services:
       - "8050:8050"
     working_dir: /opt/airflow
     command: python /opt/airflow/dashboard/app.py
+    env_file:
+      - .env
     volumes:
       - ./dashboard:/opt/airflow/dashboard:z
       - ./minio_data:/opt/airflow/minio_data:z
       - ./dags:/opt/airflow/dags:z
+      - ./logs:/opt/airflow/logs:z
+    restart: always
+
+  # 7. MLflow Tracking Server (Cổng 5000)
+  mlflow-server:
+    image: custom-airflow-xgboost:latest
+    build: .
+    user: "${AIRFLOW_UID:-50000}:0"
+    ports:
+      - "5000:5000"
+    environment:
+      - AWS_ACCESS_KEY_ID=minioadmin
+      - AWS_SECRET_ACCESS_KEY=minioadmin
+      - MLFLOW_S3_ENDPOINT_URL=http://minio:9000
+    command: >
+      bash -c "mlflow server
+      --host 0.0.0.0
+      --port 5000
+      --backend-store-uri postgresql+psycopg2://airflow:airflow@postgres/mlflow
+      --default-artifact-root s3://stock-xgboost-data/mlruns
+      --allowed-hosts '*'"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
     restart: always
 
 volumes:

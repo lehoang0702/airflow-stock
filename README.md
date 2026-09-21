@@ -83,6 +83,7 @@ graph TD
 |---|---|---|---|
 | **Airflow Web UI** | `8080` | http://localhost:8080 | `admin` / `admin` |
 | **Interactive Dashboard** | `8050` | http://localhost:8050 | *(Public access, no authentication required)* |
+| **MLflow Tracking UI** | `5000` | http://localhost:5000 | *(Public access, no authentication required)* |
 | **MinIO Web Console** | `9001` | http://localhost:9001 | `minioadmin` / `minioadmin` |
 | **MinIO S3 API** | `9000` | http://localhost:9000 | `minioadmin` / `minioadmin` |
 | **PostgreSQL** | `5432` | `localhost:5432` | `airflow` / `airflow` (db: `airflow`) |
@@ -138,6 +139,7 @@ airflow-stock/
 ├── docker-compose.yaml               # Docker Compose configuration (5 microservices)
 ├── requirements.txt                  # Python dependencies manifest
 ├── README.md                         # Project documentation
+├── create_executive_pdf.py           # Script sinh báo cáo PDF tự động cho Ban Điều Hành
 ├── dags/                             # 16 DAG Modules & Shared Utilities
 │   ├── config_shared.py              # Centralized configuration: SECTOR_MAP, TICKERS_META, MACRO, CRON
 │   ├── alert_utils.py                # Telegram alerts, on-failure callbacks & safe retry logic

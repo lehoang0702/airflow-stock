@@ -12,8 +12,8 @@ import os
 import time
 import requests
 
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "8803904442:AAH4Y-GS0J3ffhAxg5CRdv1avz9Lr7b5Svg")
-TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "7660617934")
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "")
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
 
 
 def send_telegram_safe(url: str, data: dict = None, files: dict = None, max_retries: int = 3) -> bool:
@@ -36,22 +36,15 @@ def send_telegram_safe(url: str, data: dict = None, files: dict = None, max_retr
 
 
 def send_telegram_alert(text: str, parse_mode: str = "HTML") -> bool:
-    """Gửi thông báo dạng text đến Telegram Bot một cách an toàn."""
+    """Gửi thông báo dạng text đến Telegram Bot một cách an toàn (có retry)."""
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    payload = {
+    data = {
         'chat_id': TELEGRAM_CHAT_ID,
         'text': text,
         'parse_mode': parse_mode,
         'disable_web_page_preview': True
     }
-    try:
-        resp = requests.post(url, json=payload, timeout=(5, 15))
-        if resp.status_code == 200:
-            return True
-        logging.warning(f"⚠️ Telegram alert trả về mã lỗi: {resp.status_code} - {resp.text}")
-    except Exception as e:
-        logging.error(f"❌ Lỗi kết nối Telegram alert: {e}")
-    return False
+    return send_telegram_safe(url, data=data)
 
 
 def telegram_failure_callback(context: dict):

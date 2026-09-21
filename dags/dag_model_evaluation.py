@@ -35,16 +35,7 @@ except ImportError:
 try:
     from config_shared import SECTOR_MAP
 except ImportError:
-    SECTOR_MAP = {
-        'AAPL': 'Technology', 'MSFT': 'Technology', 'NVDA': 'Technology', 'GOOGL': 'Technology',
-        'AMZN': 'Consumer Discretionary', 'NKE': 'Consumer Discretionary', 'MCD': 'Consumer Discretionary',
-        'WMT': 'Consumer Staples', 'PG': 'Consumer Staples', 'KO': 'Consumer Staples',
-        'JPM': 'Financials', 'V': 'Financials',
-        'UNH': 'Healthcare', 'JNJ': 'Healthcare',
-        'CAT': 'Industrials', 'BA': 'Industrials',
-        'XOM': 'Energy', 'CVX': 'Energy',
-        'NEE': 'Utilities', 'LIN': 'Materials'
-    }
+    from dags.config_shared import SECTOR_MAP
 
 default_args = {
     'owner': 'quant_team',

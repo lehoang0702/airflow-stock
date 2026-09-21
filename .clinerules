@@ -1,0 +1,10 @@
+# Quy tắc dự án & Phong cách phản hồi của Cline
+
+## Ngôn ngữ giao tiếp (Language)
+- Luôn luôn giao tiếp, trao đổi, suy nghĩ, giải thích và phản hồi bằng **tiếng Việt** (Vietnamese) trong mọi tình huống.
+- Khi tóm tắt kế hoạch, báo cáo tiến độ hoặc giải thích lỗi, luôn dùng tiếng Việt tự nhiên, rõ ràng, dễ hiểu.
+- Giữ nguyên các thuật ngữ kỹ thuật chuyên ngành phổ biến khi cần thiết (ví dụ: DAG, pipeline, container, port, commit, branch, schema...).
+
+## Phong cách làm việc (Workflow)
+- Phân tích cẩn thận trước khi thực hiện thay đổi.
+- Khi viết mã nguồn hoặc comment trong code, ưu tiên tính rõ ràng và đúng chuẩn của dự án.

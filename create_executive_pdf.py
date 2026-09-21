@@ -66,14 +66,14 @@ class NumberedCanvas(canvas.Canvas):
         # Trang 1 (Trang bìa) không vẽ header/footer
         if self._pageNumber > 1:
             # Header
-            self.drawString(20 * mm, 282 * mm, "BÁO CÁO DỰ ÁN: QUANTUM MULTI-MODAL STOCK FORECASTING &amp; MLOPS")
+            self.drawString(20 * mm, 282 * mm, "BÁO CÁO DỰ ÁN: QUANTUM MULTI-MODAL STOCK FORECASTING & MLOPS")
             self.setStrokeColor(colors.HexColor("#e2e8f0"))
             self.setLineWidth(0.75)
             self.line(20 * mm, 280 * mm, 190 * mm, 280 * mm)
             
             # Footer
             self.line(20 * mm, 16 * mm, 190 * mm, 16 * mm)
-            self.drawString(20 * mm, 11 * mm, "Hệ Thống Định Lượng &amp; Dự Báo Chứng Khoán • Dự án: airflow-stock")
+            self.drawString(20 * mm, 11 * mm, "Hệ Thống Định Lượng & Dự Báo Chứng Khoán • Dự án: airflow-stock")
             page_text = f"Trang {self._pageNumber} / {page_count}"
             self.drawRightString(190 * mm, 11 * mm, page_text)
         

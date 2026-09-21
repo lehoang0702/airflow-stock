@@ -1,17 +1,5 @@
 FROM apache/airflow:2.8.1-python3.11
 
 USER airflow
-RUN pip install --no-cache-dir \
-    yfinance \
-    pyarrow \
-    fastparquet \
-    xgboost \
-    scikit-learn \
-    joblib \
-    requests \
-    transformers \
-    matplotlib \
-    boto3 \
-    optuna \
-    pytest \
-    && pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu
+COPY requirements.txt /tmp/requirements.txt
+RUN pip install --default-timeout=2000 --retries 10 --no-cache-dir -r /tmp/requirements.txt

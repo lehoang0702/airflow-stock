@@ -105,7 +105,10 @@ class XGBoostModelBuilder:
         df['Sector_Std'] = df[sector_col] if sector_col else 'General'
 
         # Target: giá phiên sau > giá phiên hiện tại
-        if close_col:
+        target_col = cols_lower.get('future_direction_1d') or cols_lower.get('target')
+        if target_col:
+            df['Target_Std'] = df[target_col].astype(int)
+        elif close_col:
             df['Target_Std'] = (df.groupby('Ticker_Std')[close_col].shift(-1) > df[close_col]).astype(int)
         else:
             df['Target_Std'] = (df.index % 2 == 0).astype(int)
@@ -118,7 +121,7 @@ class XGBoostModelBuilder:
         ]
         feature_cols = [
             c for c in df.columns
-            if not any(k in c.lower() for k in leakage_keywords)
+            if c.lower() not in leakage_keywords
             and c not in ['Date_Std', 'Ticker_Std', 'Sector_Std', 'Target_Std']
         ]
 
@@ -302,7 +305,10 @@ class LSTMModelBuilder:
         df['Ticker_Std'] = df[ticker_col] if ticker_col else 'UNKNOWN'
         df['Sector_Std'] = df[sector_col] if sector_col else 'General'
 
-        if close_col:
+        target_col = cols_lower.get('future_direction_1d') or cols_lower.get('target')
+        if target_col:
+            df['Target_Std'] = df[target_col].astype(float)
+        elif close_col:
             df['Target_Std'] = (df.groupby('Ticker_Std')[close_col].shift(-1) > df[close_col]).astype(float)
         else:
             df['Target_Std'] = (df.index % 2 == 0).astype(float)

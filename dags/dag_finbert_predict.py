@@ -25,6 +25,11 @@ except ImportError:
     TELEGRAM_CHAT_ID = ""
     def send_telegram_safe(url, data=None, files=None, max_retries=3): return False
 
+try:
+    from config_shared import SECTOR_MAP
+except ImportError:
+    from dags.config_shared import SECTOR_MAP
+
 default_args = {
     'owner': 'quant_team',
     'depends_on_past': False,
