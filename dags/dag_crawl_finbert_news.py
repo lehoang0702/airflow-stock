@@ -1,7 +1,7 @@
 """
 DAG: CÀO TIN TỨC TÀI CHÍNH ĐA NGUỒN CHO 20 MÃ CỔ PHIẾU
 (Hỗ trợ Yahoo Finance API mới + Tự động Fallback Google News RSS)
-Lưu file vào MinIO: stock-xgboost-data/finbert/finbert_news_20tickers_YYYYMMDD.csv
+Lưu file vào MinIO: stock-data/finbert/finbert_news_20tickers_YYYYMMDD.csv
 """
 from datetime import datetime, timedelta
 import io
@@ -15,7 +15,7 @@ from airflow.operators.python import PythonOperator
 from airflow.providers.amazon.aws.hooks.s3 import S3Hook
 
 MINIO_CONN_ID = 'minio_conn'
-BUCKET_NAME = 'stock-xgboost-data'
+BUCKET_NAME = 'stock-data'
 
 try:
     from config_shared import SECTOR_MAP
@@ -241,7 +241,7 @@ Bao gồm các trường:
 - `ngay_cao`, `ma_co_phieu`, `nhom_nganh`, `tieu_de`, `nguon_tin`, `thoi_gian_dang`.
 
 ### 3. Đầu Ra MinIO
-- **Artifact:** `stock-xgboost-data/finbert/finbert_news_20tickers_YYYYMMDD.csv`
+- **Artifact:** `stock-data/finbert/finbert_news_20tickers_YYYYMMDD.csv`
 """
 
     crawl_news = PythonOperator(

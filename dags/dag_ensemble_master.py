@@ -1,7 +1,7 @@
 """
 DAG: ĐỐI CHIẾU 3 PHƯƠNG PHÁP ĐỘC LẬP & TẠO PHƯƠNG PHÁP 4 TỔNG HỢP
-- Lưu file PP4: stock-xgboost-data/ensemble/du_bao_tang_truong_ensemble_YYYYMMDD.csv
-- Lưu file So sánh: stock-xgboost-data/comparison/bang_so_sanh_4_phuong_phap_YYYYMMDD.csv
+- Lưu file PP4: stock-data/ensemble/du_bao_tang_truong_ensemble_YYYYMMDD.csv
+- Lưu file So sánh: stock-data/comparison/bang_so_sanh_4_phuong_phap_YYYYMMDD.csv
 - Gửi báo cáo so sánh 4 phương pháp về Telegram
 """
 from datetime import datetime, timedelta
@@ -16,7 +16,7 @@ from airflow.operators.python import PythonOperator
 from airflow.providers.amazon.aws.hooks.s3 import S3Hook
 
 MINIO_CONN_ID = 'minio_conn'
-BUCKET_NAME = 'stock-xgboost-data'
+BUCKET_NAME = 'stock-data'
 
 try:
     from alert_utils import telegram_failure_callback, TELEGRAM_TOKEN, TELEGRAM_CHAT_ID

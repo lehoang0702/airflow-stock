@@ -37,14 +37,14 @@ def predict(req: PredictRequest):
         # Load registry if latest
         version = req.version
         if version == "latest":
-            registry_csv = s3_hook.read_key("models/registry.csv", bucket_name="stock-xgboost-data")
+            registry_csv = s3_hook.read_key("models/registry.csv", bucket_name="stock-data")
             df_reg = pd.read_csv(io.StringIO(registry_csv))
             df_xgb = df_reg[df_reg['model_type'] == 'xgboost']
             if df_xgb.empty:
                 raise HTTPException(status_code=404, detail="No xgboost models found in registry")
             version = df_xgb.iloc[-1]['version']
             
-        artifacts = load_model_from_minio(s3_hook, "stock-xgboost-data", "xgboost", version)
+        artifacts = load_model_from_minio(s3_hook, "stock-data", "xgboost", version)
         if not artifacts.get('model_bytes') or not artifacts.get('feature_columns'):
             raise HTTPException(status_code=404, detail="Model artifacts not found")
             

@@ -1,6 +1,6 @@
 """
 DAG: CHẠY MÔ HÌNH FINBERT & DỰ BÁO SENTIMENT (TÍCH HỢP RETRY TELEGRAM & TIMEOUT AN TOÀN)
-Lưu file vào MinIO: stock-xgboost-data/finbert/du_bao_tang_truong_finbert_YYYYMMDD.csv
+Lưu file vào MinIO: stock-data/finbert/du_bao_tang_truong_finbert_YYYYMMDD.csv
 """
 from datetime import datetime, timedelta
 import io
@@ -15,7 +15,7 @@ from airflow.operators.python import PythonOperator
 from airflow.providers.amazon.aws.hooks.s3 import S3Hook
 
 MINIO_CONN_ID = 'minio_conn'
-BUCKET_NAME = 'stock-xgboost-data'
+BUCKET_NAME = 'stock-data'
 
 try:
     from alert_utils import telegram_failure_callback, TELEGRAM_TOKEN, TELEGRAM_CHAT_ID, send_telegram_safe
@@ -286,7 +286,7 @@ DAG sử dụng mô hình ngôn ngữ lớn chuyên ngành tài chính **FinBERT
    - Khoảng $46\% - 54\%$ ➔ **ĐỨNG NGOÀI (Sideway)**.
 
 ### 3. Đầu Ra & Trực Quan Hóa
-- **File dự báo:** `stock-xgboost-data/finbert/du_bao_tang_truong_finbert_YYYYMMDD.csv`
+- **File dự báo:** `stock-data/finbert/du_bao_tang_truong_finbert_YYYYMMDD.csv`
 - **Báo cáo phân tích:** Gửi bảng phân loại sắc thái tin tức 20 mã và CSV qua Telegram.
 - **Model Registry:** Lưu `pipeline_config.json` và `sentiment_stats.json`.
 """

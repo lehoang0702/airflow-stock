@@ -133,7 +133,7 @@ services:
       --host 0.0.0.0
       --port 5000
       --backend-store-uri postgresql+psycopg2://airflow:airflow@postgres/mlflow
-      --default-artifact-root s3://stock-xgboost-data/mlruns
+      --default-artifact-root s3://stock-data/mlruns
       --allowed-hosts '*'"
     depends_on:
       postgres:

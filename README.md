@@ -161,13 +161,13 @@ airflow-stock/
 │   ├── app.py                        # Python HTTP backend with MinIO S3 API integration
 │   └── static/                       # Responsive vanilla frontend (HTML5, CSS3, JavaScript)
 ├── minio_data/                       # Local volume mount for MinIO S3 storage
-│   └── stock-xgboost-data/           # Market datasets, model registry, evaluations
+│   └── stock-data/           # Market datasets, model registry, evaluations
 └── logs/                             # Apache Airflow task execution logs
 ```
 
 ---
 
-## 🗄️ MinIO S3 Storage Structure (`stock-xgboost-data`)
+## 🗄️ MinIO S3 Storage Structure (`stock-data`)
 
 - `raw-data/`: Raw historical market quotes and daily ingested RSS news articles.
 - `xgboost/`: 115+ engineered technical, intermarket, and fundamental valuation features (`.parquet` & `.csv`).

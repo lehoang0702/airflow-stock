@@ -65,7 +65,7 @@ logger.addHandler(console_handler)
 STATIC_DIR = os.path.join(BASE_DIR, "static")
 PORT = 8050
 
-BUCKET_NAME = "stock-xgboost-data"
+BUCKET_NAME = "stock-data"
 
 # Import TICKERS_META từ config_shared (Single Source of Truth)
 TICKERS_META = _TICKERS_META_SHARED

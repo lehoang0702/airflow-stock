@@ -1,6 +1,6 @@
 """
 DAG: TRAIN PYTORCH STACKED LSTM (HIỆU CHỈNH XÁC SUẤT CHUẨN THỰC TẾ 44% - 62%)
-Lưu file vào MinIO: stock-xgboost-data/lstm/du_bao_tang_truong_lstm_YYYYMMDD.csv
+Lưu file vào MinIO: stock-data/lstm/du_bao_tang_truong_lstm_YYYYMMDD.csv
 """
 from datetime import datetime, timedelta
 import io
@@ -20,7 +20,7 @@ from airflow.operators.python import PythonOperator
 from airflow.providers.amazon.aws.hooks.s3 import S3Hook
 
 MINIO_CONN_ID = 'minio_conn'
-BUCKET_NAME = 'stock-xgboost-data'
+BUCKET_NAME = 'stock-data'
 
 try:
     from alert_utils import telegram_failure_callback, TELEGRAM_TOKEN, TELEGRAM_CHAT_ID, send_telegram_safe
@@ -60,6 +60,13 @@ def train_and_predict_lstm_task(**context):
 
     torch.set_num_threads(2)
     s3_hook = S3Hook(aws_conn_id=MINIO_CONN_ID)
+    for b in [BUCKET_NAME, "stock-xgboost-data"]:
+        try:
+            if not s3_hook.check_for_bucket(b):
+                s3_hook.create_bucket(b)
+        except Exception:
+            pass
+
     date_nodash = datetime.now().strftime("%Y%m%d")
     today_str = datetime.now().strftime("%Y-%m-%d")
 
@@ -249,6 +256,42 @@ def train_and_predict_lstm_task(**context):
     except Exception as e:
         logging.warning(f'⚠️ Không thể lưu model registry LSTM: {e}')
 
+    # === KIỂM ĐỊNH CHẤT LƯỢNG MÔ HÌNH (CHAMPION - CHALLENGER GATE) ===
+    champion_status = 'USE_CURRENT'
+    champion_version = f'v{date_nodash}'
+    champion_reason = "Model mới đạt chuẩn chất lượng."
+    try:
+        from model_registry import select_champion_model
+        decision = select_champion_model(
+            s3_hook=s3_hook,
+            bucket_name=BUCKET_NAME,
+            model_type='lstm',
+            current_version=f'v{date_nodash}',
+            current_acc=test_acc,
+            current_auc=test_auc,
+            max_lookback_days=7,
+            min_auc=0.53,
+            min_acc=0.50
+        )
+        champion_status = decision['status']
+        champion_reason = decision['reason']
+        champion_version = decision['selected_version']
+        logging.info(f"🏆 Champion Gate LSTM: status={champion_status}, version={champion_version}")
+
+        if champion_status == 'FALLBACK':
+            artifacts = decision.get('artifacts')
+            if artifacts and artifacts.get('model_bytes'):
+                state_dict = torch.load(io.BytesIO(artifacts['model_bytes']), map_location='cpu')
+                model.load_state_dict(state_dict)
+                model.eval()
+                if artifacts.get('scaler_bytes'):
+                    scaler = _pkl.loads(artifacts['scaler_bytes'])
+                test_acc = decision['selected_metrics'].get('accuracy', test_acc)
+                test_auc = decision['selected_metrics'].get('auc_roc', test_auc)
+                logging.warning(f"🔄 ĐÃ LOAD FALLBACK MODEL LSTM ({champion_version}) ĐỂ DỰ BÁO!")
+    except Exception as e:
+        logging.warning(f"⚠️ Lỗi trong bước chọn Champion Model LSTM: {e}")
+
     # 5. Dự báo 20 mã với phân bổ xác suất thực tế
     latest_results = []
     for ticker, grp in df.groupby('Ticker_Std'):
@@ -260,26 +303,32 @@ def train_and_predict_lstm_task(**context):
         last_seq = scaler.transform(feats[-lookback:])
         seq_tensor = torch.tensor(last_seq, dtype=torch.float32).unsqueeze(0)
 
-        with torch.no_grad():
-            raw_logit = float(model(seq_tensor).item())
-            # Áp dụng Temperature Scaling (T=2.5) để hãm xác suất về khoảng 44% - 62%
-            prob_sigmoid = 1.0 / (1.0 + np.exp(-raw_logit / 2.5))
-            prob_up = float(np.clip(prob_sigmoid, 0.42, 0.62))
-
-        # Chuẩn hóa ngưỡng quyết định (Confidence Threshold Filtering)
-        # Lọc nhiễu vùng phân vân 0.45 - 0.55 -> ĐỨNG NGOÀI, chỉ MUA khi >= 0.55, BÁN khi <= 0.45
-        if prob_up >= 0.55:
-            rec = "MUA"
-            trend = "Tăng mạnh" if prob_up >= 0.60 else "Tăng tích lũy"
-            conf = "Rất cao" if prob_up >= 0.60 else "Cao"
-        elif prob_up <= 0.45:
-            rec = "BÁN"
-            trend = "Giảm mạnh" if prob_up <= 0.40 else "Giảm phân phối"
-            conf = "Rất cao" if prob_up <= 0.40 else "Cao"
-        else:
+        if champion_status == 'SAFE_MODE':
             rec = "ĐỨNG NGOÀI"
-            trend = "Đi ngang / Lưỡng lự (Sideway)"
-            conf = "Trung bình"
+            trend = "Thị trường biến động mạnh (Safe Mode)"
+            conf = "Bảo vệ vốn (Safe Mode)"
+            prob_up = 0.50
+        else:
+            with torch.no_grad():
+                raw_logit = float(model(seq_tensor).item())
+                # Áp dụng Temperature Scaling (T=2.5) để hãm xác suất về khoảng 44% - 62%
+                prob_sigmoid = 1.0 / (1.0 + np.exp(-raw_logit / 2.5))
+                prob_up = float(np.clip(prob_sigmoid, 0.42, 0.62))
+
+            # Chuẩn hóa ngưỡng quyết định (Confidence Threshold Filtering)
+            # Lọc nhiễu vùng phân vân 0.45 - 0.55 -> ĐỨNG NGOÀI, chỉ MUA khi >= 0.55, BÁN khi <= 0.45
+            if prob_up >= 0.55:
+                rec = "MUA"
+                trend = "Tăng mạnh" if prob_up >= 0.60 else "Tăng tích lũy"
+                conf = "Rất cao" if prob_up >= 0.60 else "Cao"
+            elif prob_up <= 0.45:
+                rec = "BÁN"
+                trend = "Giảm mạnh" if prob_up <= 0.40 else "Giảm phân phối"
+                conf = "Rất cao" if prob_up <= 0.40 else "Cao"
+            else:
+                rec = "ĐỨNG NGOÀI"
+                trend = "Đi ngang / Lưỡng lự (Sideway)"
+                conf = "Trung bình"
 
         latest_results.append({
             'ngay_du_bao': today_str,
@@ -320,10 +369,18 @@ def train_and_predict_lstm_task(**context):
     n_sell = len(sell_list)
     n_sideway = len(df_full) - n_buy - n_sell
 
+    # Header Telegram linh hoạt theo trạng thái Champion Gate
+    if champion_status == 'FALLBACK':
+        gate_status_line = f"🔄 <b>CHAMPION GATE:</b> Fallback model <code>{champion_version}</code> (Model mới sụt giảm chất lượng)"
+    elif champion_status == 'SAFE_MODE':
+        gate_status_line = "🚨 <b>CHAMPION GATE:</b> KÍCH HOẠT SAFE MODE (AI tạm dừng khuyến nghị để bảo vệ vốn)"
+    else:
+        gate_status_line = f"🎯 <b>Hiệu năng Test (2024-nay):</b> Acc {test_acc*100:.1f}% | AUC {test_auc:.2f} (Champion: {champion_version})"
+
     msg_lines = [
         "🧠 <b>BẢN TIN DỰ BÁO CỔ PHIẾU (LSTM DEEP LEARNING)</b>",
         f"📅 <b>Dữ liệu phiên:</b> {today_str}",
-        f"🎯 <b>Hiệu năng Test (2024-nay):</b> Acc {test_acc*100:.1f}% | AUC {test_auc:.2f}",
+        gate_status_line,
         f"📊 <b>Thị trường 20 mã:</b> 🟢 Mua: {n_buy} | 🟡 Đi ngang: {n_sideway} | 🔴 Bán: {n_sell}",
         "━━━━━━━━━━━━━━━━━━━━━━━━━━━",
         ""
@@ -445,7 +502,7 @@ DAG thực hiện huấn luyện mạng nơ-ron hồi quy sâu **CalibratedStack
 - **Metadata:** `models/lstm/vYYYYMMDD/model_card.json` và cập nhật vào `models/registry.csv`.
 
 ### 3. Đầu Ra & Trực Quan Hóa
-- **File dự báo:** `stock-xgboost-data/lstm/du_bao_tang_truong_lstm_YYYYMMDD.csv`
+- **File dự báo:** `stock-data/lstm/du_bao_tang_truong_lstm_YYYYMMDD.csv`
 - **Biểu đồ nến & chỉ báo:** 20 biểu đồ Dual-Panel độc lập, nén `charts_lstm_YYYYMMDD.zip` lên MinIO và gửi tệp ZIP qua Telegram.
 """
 

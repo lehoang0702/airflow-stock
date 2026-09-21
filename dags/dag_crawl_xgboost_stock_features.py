@@ -20,7 +20,7 @@ TICKERS = {
 }
 
 MINIO_CONN_ID = 'minio_conn'
-MINIO_BUCKET = 'stock-xgboost-data'
+MINIO_BUCKET = 'stock-data'
 
 
 def clean_df(df_raw: pd.DataFrame) -> pd.DataFrame:
@@ -399,7 +399,7 @@ DAG này phụ trách tầng **Data Ingestion & Feature Engineering** cho nhánh
 | **Kinh Tế Vĩ Mô (Macro)** | Lợi suất TPCP Mỹ 10Y (^TNX), Chỉ số sợ hãi (^VIX), Tương quan SPY & QQQ |
 
 ### 3. Đầu Ra MinIO
-- **Artifact:** `stock-xgboost-data/xgboost/xgboost_stock_20tickers_10y_YYYYMMDD.csv`
+- **Artifact:** `stock-data/xgboost/xgboost_stock_20tickers_10y_YYYYMMDD.csv`
 """
 
     crawl_task = PythonOperator(

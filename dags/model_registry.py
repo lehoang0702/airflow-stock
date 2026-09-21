@@ -830,3 +830,160 @@ def _update_registry(s3_hook, bucket_name: str, model_card: ModelCard):
         replace=True
     )
     logging.info(f"📝 Đã cập nhật registry.csv ({len(df)} phiên bản)")
+
+
+# ==============================================================================
+#  CHAMPION-CHALLENGER SELECTION & FALLBACK MECHANISM
+# ==============================================================================
+
+def select_champion_model(s3_hook,
+                          bucket_name: str,
+                          model_type: str,
+                          current_version: str,
+                          current_acc: float,
+                          current_auc: float,
+                          max_lookback_days: int = 7,
+                          min_auc: float = 0.53,
+                          min_acc: float = 0.50) -> Dict[str, Any]:
+    """
+    Cơ chế Model Validation Gate (Champion-Challenger):
+    Kiểm định chất lượng model mới train hôm nay. Nếu không đạt chuẩn chất lượng
+    (do thị trường biến động/nhiễu dữ liệu), tự động fallback về model tốt nhất
+    đã được lưu trong vòng `max_lookback_days` (mặc định 7 ngày), hoặc kích hoạt Safe Mode.
+
+    Args:
+        s3_hook: Airflow S3Hook
+        bucket_name: MinIO bucket
+        model_type: "xgboost" | "lstm"
+        current_version: Phiên bản vừa train hôm nay (VD: "v20260921")
+        current_acc: Accuracy của model vừa train trên Test set
+        current_auc: AUC-ROC của model vừa train trên Test set
+        max_lookback_days: Giới hạn số ngày lùi về quá khứ (mặc định 7 ngày để tránh Concept Drift)
+        min_auc: Ngưỡng AUC tối thiểu chấp nhận được (mặc định 0.53)
+        min_acc: Ngưỡng Accuracy tối thiểu chấp nhận được (mặc định 0.50)
+
+    Returns:
+        Dict:
+            'status': 'USE_CURRENT' | 'FALLBACK' | 'SAFE_MODE'
+            'selected_version': str
+            'selected_metrics': {'accuracy': float, 'auc_roc': float}
+            'reason': str
+            'artifacts': Optional[Dict]
+    """
+    # 1. Kiểm tra model mới hôm nay có đạt ngưỡng tối thiểu hay không
+    current_passed = (current_auc >= min_auc and current_acc >= min_acc)
+
+    if current_passed:
+        logging.info(f"✅ Model mới {current_version} ({model_type}) đạt chuẩn chất lượng "
+                     f"(AUC={current_auc:.3f} >= {min_auc}, Acc={current_acc:.1%} >= {min_acc:.0%}). "
+                     f"Chọn làm Champion!")
+        return {
+            'status': 'USE_CURRENT',
+            'selected_version': current_version,
+            'selected_metrics': {'accuracy': current_acc, 'auc_roc': current_auc},
+            'reason': (f"Model mới ({current_version}: AUC={current_auc:.3f}, Acc={current_acc:.1%}) "
+                       f"đạt chuẩn chất lượng (AUC>={min_auc}, Acc>={min_acc:.0%})."),
+            'artifacts': None
+        }
+
+    # 2. Model hôm nay không đạt chuẩn -> Bắt đầu quét registry.csv tìm model cũ dự phòng
+    logging.warning(f"⚠️ Model mới {current_version} ({model_type}) KHÔNG ĐẠT CHUẨN "
+                    f"(AUC={current_auc:.3f} < {min_auc} hoặc Acc={current_acc:.1%} < {min_acc:.0%}). "
+                    f"Bắt đầu quét registry.csv trong {max_lookback_days} ngày gần nhất...")
+
+    try:
+        current_dt = datetime.strptime(current_version.replace('v', ''), "%Y%m%d")
+    except Exception:
+        current_dt = datetime.now()
+
+    registry_key = "models/registry.csv"
+    df_reg = pd.DataFrame()
+    try:
+        raw = s3_hook.read_key(registry_key, bucket_name=bucket_name)
+        df_reg = pd.read_csv(io.StringIO(raw))
+    except Exception as e:
+        logging.warning(f"⚠️ Không thể đọc registry.csv từ MinIO: {e}")
+
+    valid_candidates = []
+    if not df_reg.empty:
+        # Lọc đúng model_type và loại trừ version hiện tại
+        df_type = df_reg[(df_reg['model_type'] == model_type) & (df_reg['version'] != current_version)].copy()
+
+        for _, row in df_type.iterrows():
+            ver = str(row.get('version', '')).strip()
+            # Xác định ngày huấn luyện
+            row_dt = None
+            if pd.notna(row.get('trained_date')):
+                try:
+                    row_dt = datetime.strptime(str(row['trained_date']).strip(), "%Y-%m-%d")
+                except Exception:
+                    pass
+
+            if row_dt is None and ver.startswith('v'):
+                try:
+                    row_dt = datetime.strptime(ver.replace('v', ''), "%Y%m%d")
+                except Exception:
+                    pass
+
+            if row_dt is None:
+                continue
+
+            # Kiểm tra khoảng thời gian (không quá max_lookback_days và không ở tương lai)
+            days_diff = (current_dt - row_dt).days
+            if 0 < days_diff <= max_lookback_days:
+                auc_val = pd.to_numeric(row.get('auc_roc'), errors='coerce')
+                acc_val = pd.to_numeric(row.get('accuracy'), errors='coerce')
+
+                # Kiểm tra ngưỡng chất lượng
+                if pd.notna(auc_val) and pd.notna(acc_val):
+                    if auc_val >= min_auc and acc_val >= min_acc:
+                        valid_candidates.append({
+                            'version': ver,
+                            'trained_date': str(row.get('trained_date', '')),
+                            'accuracy': float(acc_val),
+                            'auc_roc': float(auc_val),
+                            'days_ago': days_diff
+                        })
+
+    # 3. Đánh giá ứng viên Fallback
+    if valid_candidates:
+        # Sắp xếp ưu tiên AUC cao nhất, sau đó đến Accuracy
+        valid_candidates.sort(key=lambda x: (x['auc_roc'], x['accuracy']), reverse=True)
+        best_candidate = valid_candidates[0]
+        best_ver = best_candidate['version']
+
+        logging.info(f"🔄 Tìm thấy model fallback tốt nhất trong {max_lookback_days} ngày: "
+                     f"{best_ver} (AUC={best_candidate['auc_roc']:.3f}, Acc={best_candidate['accuracy']:.1%}, "
+                     f"cách đây {best_candidate['days_ago']} ngày).")
+
+        # Tải artifacts của model đó về
+        artifacts = load_model_from_minio(s3_hook, bucket_name, model_type, version=best_ver)
+        if artifacts and artifacts.get('model_bytes'):
+            return {
+                'status': 'FALLBACK',
+                'selected_version': best_ver,
+                'selected_metrics': {
+                    'accuracy': best_candidate['accuracy'],
+                    'auc_roc': best_candidate['auc_roc']
+                },
+                'reason': (f"Model mới ({current_version}: AUC={current_auc:.3f}, Acc={current_acc:.1%}) không đạt chuẩn. "
+                           f"Tự động fallback về phiên bản {best_ver} (AUC={best_candidate['auc_roc']:.3f}, "
+                           f"Acc={best_candidate['accuracy']:.1%}, cách {best_candidate['days_ago']} ngày)."),
+                'artifacts': artifacts
+            }
+        else:
+            logging.warning(f"⚠️ Model {best_ver} thiếu model_bytes trên MinIO, chuyển sang Safe Mode.")
+
+    # 4. Kịch bản xấu nhất: Không có model nào trong max_lookback_days đạt chuẩn -> Safe Mode
+    logging.warning(f"🚨 KÍCH HOẠT SAFE MODE: Model mới {current_version} và tất cả model trong {max_lookback_days} ngày qua "
+                    f"đều không đạt chuẩn chất lượng (AUC < {min_auc} hoặc Acc < {min_acc:.0%}).")
+    return {
+        'status': 'SAFE_MODE',
+        'selected_version': current_version,
+        'selected_metrics': {'accuracy': current_acc, 'auc_roc': current_auc},
+        'reason': (f"CẢNH BÁO THỊ TRƯỜNG BIẾN ĐỘNG MẠNH: Model mới ({current_version}: AUC={current_auc:.3f}, Acc={current_acc:.1%}) "
+                   f"và toàn bộ model trong {max_lookback_days} ngày gần nhất đều không đạt ngưỡng tin cậy. "
+                   f"Kích hoạt SAFE MODE (Đứng ngoài quan sát, không giao dịch để bảo vệ vốn)."),
+        'artifacts': None
+    }
+

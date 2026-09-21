@@ -1,7 +1,7 @@
 """
 DAG: CÀO DỮ LIỆU & TÍNH FEATURES CHUỖI THỜI GIAN CHO LSTM
 (Khắc phục lỗi lệch ngày 2026, tải an toàn ^VIX, ^TNX, SPY, QQQ)
-Lưu file vào MinIO: stock-xgboost-data/lstm/lstm_stock_20tickers_10y_YYYYMMDD.csv
+Lưu file vào MinIO: stock-data/lstm/lstm_stock_20tickers_10y_YYYYMMDD.csv
 """
 from datetime import datetime, timedelta
 import io
@@ -15,7 +15,7 @@ from airflow.operators.python import PythonOperator
 from airflow.providers.amazon.aws.hooks.s3 import S3Hook
 
 MINIO_CONN_ID = 'minio_conn'
-BUCKET_NAME = 'stock-xgboost-data'
+BUCKET_NAME = 'stock-data'
 
 try:
     from config_shared import TICKERS_LIST as TICKERS_20, MACRO_TICKERS as MACRO_DICT, SECTOR_MAP
@@ -273,7 +273,7 @@ Phụ trách chuẩn bị tập dữ liệu chuỗi thời gian nến (OHLCV) v�
 - **Khối Lượng & Chu kỳ:** Khối lượng chuẩn hóa log, chỉ số dao động RSI, vị thế dải Bollinger.
 
 ### 3. Đầu Ra MinIO
-- **Artifact:** `stock-xgboost-data/lstm/lstm_stock_20tickers_10y_YYYYMMDD.csv`
+- **Artifact:** `stock-data/lstm/lstm_stock_20tickers_10y_YYYYMMDD.csv`
 """
 
     crawl_task = PythonOperator(
