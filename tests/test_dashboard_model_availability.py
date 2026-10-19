@@ -108,7 +108,7 @@ class EnsembleDagAvailabilityTests(unittest.TestCase):
         path = Path(__file__).resolve().parents[1] / 'dags/dag_ensemble_master.py'
         tree = ast.parse(path.read_text())
         node = next(item for item in tree.body if isinstance(item, ast.FunctionDef) and item.name == 'compare_and_ensemble_task')
-        stamp = datetime.now().strftime('%Y%m%d')
+        stamp = datetime.now(timezone.utc).strftime('%Y%m%d')
 
         class MemoryS3:
             def __init__(self):

@@ -113,6 +113,10 @@ def crawl_and_extract_lstm_features(**context):
             hist['Ticker'] = ticker
             hist['Sector'] = SECTOR_MAP.get(ticker, 'General')
 
+            if all(c in hist.columns for c in ['Open', 'High', 'Low', 'Close']):
+                hist['High'] = hist[['High', 'Open', 'Close']].max(axis=1)
+                hist['Low'] = hist[['Low', 'Open', 'Close']].min(axis=1)
+
             # Tính chỉ số kỹ thuật
             hist_feats = calculate_technical_features(hist)
 
@@ -135,6 +139,10 @@ def crawl_and_extract_lstm_features(**context):
         backups = load_backup_rows(
             s3_hook, BUCKET_NAME, 'lstm/lstm_stock_20tickers_10y_', 'Ticker',
             failed_tickers, ['Date', 'Open', 'High', 'Low', 'Close', 'Volume'], date_nodash)
+        for b_df in backups.values():
+            if all(c in b_df.columns for c in ['Open', 'High', 'Low', 'Close']):
+                b_df['High'] = b_df[['High', 'Open', 'Close']].max(axis=1)
+                b_df['Low'] = b_df[['Low', 'Open', 'Close']].min(axis=1)
         all_stock_rows.extend(backups.values())
 
     if not all_stock_rows:
@@ -145,6 +153,9 @@ def crawl_and_extract_lstm_features(**context):
     # Normalize the entire panel before sorting or creating horizon targets.
     df_final['Date'] = pd.to_datetime(df_final['Date'], errors='coerce', utc=True).dt.tz_localize(None).dt.normalize()
     df_final = df_final.sort_values(['Ticker', 'Date']).reset_index(drop=True)
+    if all(c in df_final.columns for c in ['Open', 'High', 'Low', 'Close']):
+        df_final['High'] = df_final[['High', 'Open', 'Close']].max(axis=1)
+        df_final['Low'] = df_final[['Low', 'Open', 'Close']].min(axis=1)
     require_complete_panel(df_final, 'Ticker', 'Date', TICKERS_20)
     from data_validator import validate_lstm_dataset, save_and_alert_quality_report
     qa_result = validate_lstm_dataset(df_final, min_lookback=30, expected_tickers=TICKERS_20)

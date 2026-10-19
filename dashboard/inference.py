@@ -84,7 +84,10 @@ def _get_history(ticker, period, auto_adjust):
                 
                 if isinstance(df.columns, pd.MultiIndex):
                     df.columns = df.columns.get_level_values(0)
-                    
+
+                if all(c in df.columns for c in ['Open', 'High', 'Low', 'Close']):
+                    df['High'] = df[['High', 'Open', 'Close']].max(axis=1)
+                    df['Low'] = df[['Low', 'Open', 'Close']].min(axis=1)
         except Exception as e:
             logging.warning(f"⚠️ fetch history error {ticker}: {e}")
             df = pd.DataFrame()

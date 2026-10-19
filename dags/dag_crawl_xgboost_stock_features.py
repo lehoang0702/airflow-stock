@@ -27,7 +27,11 @@ def clean_df(df_raw: pd.DataFrame) -> pd.DataFrame:
     if isinstance(df_raw.columns, pd.MultiIndex):
         df_raw.columns = df_raw.columns.get_level_values(0)
     
-    df = df_raw.reset_index().copy()
+    if any(str(c).lower() in ['date', 'datetime'] for c in df_raw.columns):
+        df = df_raw.copy()
+    else:
+        df = df_raw.reset_index().copy()
+
     for col in df.columns:
         if str(col).lower() in ['date', 'datetime', 'index']:
             df.rename(columns={col: 'date'}, inplace=True)
@@ -38,6 +42,9 @@ def clean_df(df_raw: pd.DataFrame) -> pd.DataFrame:
         df['adj_close'] = df['close']
         
     df['date'] = pd.to_datetime(df['date']).dt.tz_localize(None)
+    if {'open', 'high', 'low', 'close'}.issubset(df.columns):
+        df['high'] = df[['high', 'open', 'close']].max(axis=1)
+        df['low'] = df[['low', 'open', 'close']].min(axis=1)
     return df.sort_values('date').reset_index(drop=True)
 
 
@@ -132,6 +139,9 @@ def crawl_process_and_upload_to_minio(**kwargs):
             datetime.now().strftime('%Y%m%d'), exclude_today=False)
         for ticker, raw in backups.items():
             raw['date'] = pd.to_datetime(raw['date']).dt.tz_localize(None)
+            if {'open', 'high', 'low', 'close'}.issubset(raw.columns):
+                raw['high'] = raw[['high', 'open', 'close']].max(axis=1)
+                raw['low'] = raw[['low', 'open', 'close']].min(axis=1)
             all_dfs.append(calculate_technical_indicators(
                 raw.sort_values('date').reset_index(drop=True), df_macro, ticker,
                 TICKERS[ticker]['sector'], fetch_stock_fundamentals(ticker)))
@@ -140,6 +150,9 @@ def crawl_process_and_upload_to_minio(**kwargs):
         raise ValueError("❌ Không tải được dữ liệu cho bất kỳ mã nào! Hủy quá trình để không ghi đè file rỗng lên MinIO.")
 
     combined_df = pd.concat(all_dfs, ignore_index=True)
+    if {'open', 'high', 'low', 'close'}.issubset(combined_df.columns):
+        combined_df['high'] = combined_df[['high', 'open', 'close']].max(axis=1)
+        combined_df['low'] = combined_df[['low', 'open', 'close']].min(axis=1)
     require_complete_panel(combined_df, 'symbol', 'date', list(TICKERS))
     from data_validator import validate_xgboost_dataset, save_and_alert_quality_report
     qa_raw = validate_xgboost_dataset(combined_df.rename(columns={
