@@ -1,0 +1,26 @@
+# Local state is supplied through Compose volumes, not the image build.
+.git/
+.env
+.env.*
+!.env.example
+.cache/
+.pytest_cache/
+.local-backups/
+.kilo/
+.agents/
+.aws/
+.codex/
+.vscode/
+.idea/
+.config/
+logs/
+minio_data/
+output/
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+**/*.bak
+**/*.save
+**/*.swp
+**/*~
+.DS_Store

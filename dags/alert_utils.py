@@ -6,14 +6,23 @@ và gửi cảnh báo chi tiết về Bot Telegram khi có bất kỳ task nào 
 """
 
 import logging
-import traceback
 from datetime import datetime
 import os
 import time
 import requests
 
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "")
-TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
+# Cấu hình 2 Bot Telegram riêng biệt:
+# 1. Pipeline Alert Bot: Cảnh báo lỗi task, sự cố pipeline, vi phạm chất lượng dữ liệu
+TELEGRAM_ALERT_TOKEN = os.getenv("TELEGRAM_ALERT_TOKEN") or os.getenv("TELEGRAM_TOKEN", "")
+TELEGRAM_ALERT_CHAT_ID = os.getenv("TELEGRAM_ALERT_CHAT_ID") or os.getenv("TELEGRAM_CHAT_ID", "")
+
+# 2. Prediction Bot: Gửi kết quả dự báo của các mô hình (XGBoost, LSTM, FinBERT, Ensemble)
+TELEGRAM_PREDICT_TOKEN = os.getenv("TELEGRAM_PREDICT_TOKEN") or os.getenv("TELEGRAM_TOKEN", "")
+TELEGRAM_PREDICT_CHAT_ID = os.getenv("TELEGRAM_PREDICT_CHAT_ID") or os.getenv("TELEGRAM_CHAT_ID", "")
+
+# Tương thích ngược: TELEGRAM_TOKEN mặc định trỏ về Prediction Bot cho các DAG xuất kết quả
+TELEGRAM_TOKEN = TELEGRAM_PREDICT_TOKEN
+TELEGRAM_CHAT_ID = TELEGRAM_PREDICT_CHAT_ID
 
 
 def send_telegram_safe(url: str, data: dict = None, files: dict = None, max_retries: int = 3) -> bool:
@@ -21,6 +30,12 @@ def send_telegram_safe(url: str, data: dict = None, files: dict = None, max_retr
     Gửi request POST an toàn tới Telegram API (sendMessage / sendDocument / sendPhoto)
     kèm cơ chế retry Exponential Backoff (1s, 2s, 4s).
     """
+    if os.getenv('TELEGRAM_DISABLED', '').lower() in {'1', 'true', 'yes'}:
+        logging.info('Telegram delivery is disabled for this run.')
+        return False
+    if not data or not data.get('chat_id'):
+        logging.info('Telegram delivery skipped: no recipient configured.')
+        return False
     for attempt in range(max_retries):
         try:
             resp = requests.post(url, data=data, files=files, timeout=(10, 30))
@@ -35,11 +50,37 @@ def send_telegram_safe(url: str, data: dict = None, files: dict = None, max_retr
     return False
 
 
-def send_telegram_alert(text: str, parse_mode: str = "HTML") -> bool:
-    """Gửi thông báo dạng text đến Telegram Bot một cách an toàn (có retry)."""
-    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+def send_telegram_alert(text: str, parse_mode: str = "HTML", token: str = None, chat_id: str = None) -> bool:
+    """Gửi cảnh báo lỗi hệ thống/pipeline tới Alert Bot."""
+    target_token = token or TELEGRAM_ALERT_TOKEN
+    target_chat_id = chat_id or TELEGRAM_ALERT_CHAT_ID
+    if not target_token or not target_chat_id:
+        logging.warning("⚠️ Chưa cấu hình TELEGRAM_ALERT_TOKEN hoặc TELEGRAM_ALERT_CHAT_ID.")
+        return False
+    url = f"https://api.telegram.org/bot{target_token}/sendMessage"
     data = {
-        'chat_id': TELEGRAM_CHAT_ID,
+        'chat_id': target_chat_id,
+        'text': text,
+        'parse_mode': parse_mode,
+        'disable_web_page_preview': True
+    }
+    return send_telegram_safe(url, data=data)
+
+
+def send_telegram_prediction(text: str = None, files: dict = None, caption: str = None, parse_mode: str = "HTML") -> bool:
+    """Gửi thông báo kết quả dự đoán của các mô hình tới Prediction Bot."""
+    if not TELEGRAM_PREDICT_TOKEN or not TELEGRAM_PREDICT_CHAT_ID:
+        logging.warning("⚠️ Chưa cấu hình TELEGRAM_PREDICT_TOKEN hoặc TELEGRAM_PREDICT_CHAT_ID.")
+        return False
+    if files:
+        url = f"https://api.telegram.org/bot{TELEGRAM_PREDICT_TOKEN}/sendDocument"
+        data = {'chat_id': TELEGRAM_PREDICT_CHAT_ID}
+        if caption:
+            data['caption'] = caption
+        return send_telegram_safe(url, data=data, files=files)
+    url = f"https://api.telegram.org/bot{TELEGRAM_PREDICT_TOKEN}/sendMessage"
+    data = {
+        'chat_id': TELEGRAM_PREDICT_CHAT_ID,
         'text': text,
         'parse_mode': parse_mode,
         'disable_web_page_preview': True

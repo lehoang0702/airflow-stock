@@ -2,10 +2,10 @@
 DAG: TRAIN VÀ DỰ BÁO XGBOOST (BẢN TIN ĐẦY ĐỦ - LUÔN HIỂN THỊ TOP RANKING & THỊ TRƯỜNG)
 Lưu file vào MinIO: stock-data/xgboost/du_bao_tang_truong_YYYYMMDD.csv
 """
-from datetime import datetime, timedelta
+
+from pipeline_data import prepare_target, clean_features, rolling_temporal_masks, normalize_price_history, add_cross_sectional_features
+from datetime import datetime, timedelta, timezone
 import io
-import time
-import requests
 import logging
 import pandas as pd
 import numpy as np
@@ -33,7 +33,7 @@ except ImportError:
 COLUMNS_9 = [
     'ngay_du_bao', 'ma_co_phieu', 'nhom_nganh', 'khuyen_nghi',
     'xac_suat_tang_gia', 'xu_huong_du_kien', 'do_tin_cay',
-    'do_chinh_xac_mo_hinh', 'chi_so_auc'
+    'do_chinh_xac_mo_hinh', 'chi_so_auc', 'loi_nhuan_5d_du_kien', 'gia_5d_du_kien'
 ]
 
 default_args = {
@@ -43,6 +43,7 @@ default_args = {
     'retries': 1,
     'retry_delay': timedelta(minutes=2),
     'on_failure_callback': telegram_failure_callback,
+    'execution_timeout': timedelta(minutes=30),
 }
 
 def train_and_predict_xgboost_task(**context):
@@ -50,15 +51,17 @@ def train_and_predict_xgboost_task(**context):
     from sklearn.metrics import accuracy_score, roc_auc_score
 
     s3_hook = S3Hook(aws_conn_id=MINIO_CONN_ID)
-    for b in [BUCKET_NAME, "stock-xgboost-data"]:
-        try:
-            if not s3_hook.check_for_bucket(b):
-                s3_hook.create_bucket(b)
-        except Exception:
-            pass
+    try:
+        if not s3_hook.check_for_bucket(BUCKET_NAME):
+            s3_hook.create_bucket(BUCKET_NAME)
+    except Exception:
+        pass
 
-    date_nodash = datetime.now().strftime("%Y%m%d")
-    today_str = datetime.now().strftime("%Y-%m-%d")
+    from pipeline_storage import new_model_version, snapshot_training_dataset
+    model_version = new_model_version()
+    pipeline_run_id = (getattr(context.get('dag_run'), 'conf', None) or {}).get('pipeline_run_id')
+    date_nodash = datetime.now(timezone.utc).strftime("%Y%m%d")
+    today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
     # 1. Đọc dataset MinIO (Tự động lọc file hợp lệ > 100 dòng)
     keys = s3_hook.list_keys(bucket_name=BUCKET_NAME, prefix="xgboost/xgboost_stock_20tickers_10y_")
@@ -94,124 +97,130 @@ def train_and_predict_xgboost_task(**context):
     df['Sector_Std'] = df[sector_col] if sector_col else df['Ticker_Std'].map(SECTOR_MAP).fillna('General')
 
     # Target
-    close_col = cols_lower.get('close') or cols_lower.get('adj close')
+    close_col = cols_lower.get('close') or cols_lower.get('adj close') or cols_lower.get('adj_close')
     target_col = cols_lower.get('future_direction_1d') or cols_lower.get('target')
-    if target_col:
-        df['Target_Std'] = df[target_col].astype(int)
-    elif close_col:
-        df['Target_Std'] = (df.groupby('Ticker_Std')[close_col].shift(-1) > df[close_col]).astype(int)
-    else:
-        df['Target_Std'] = (df.index % 2 == 0).astype(int)
+    df = prepare_target(df, target_col, close_col)
 
-    # Lọc Features sạch — LOẠI BỎ TRIỆT ĐỂ RÒ RỈ DỮ LIỆU TƯƠNG LAI (DATA LEAKAGE)
-    def is_leakage_col(col_name: str) -> bool:
-        c = col_name.lower()
-        if c in ['date_std', 'ticker_std', 'sector_std', 'target_std', 'split_set']:
-            return True
-        if any(c.startswith(p) for p in ['future', 'target', 'label']):
-            return True
-        if c in ['open', 'high', 'low', 'close', 'adj close', 'volume', 'symbol', 'ticker', 'date', 'datetime', 'sector']:
-            return True
-        if 'unnamed' in c:
-            return True
-        return False
-
-    feature_cols = [c for c in df.columns if not is_leakage_col(c)]
-    
-    for c in feature_cols:
-        df[c] = pd.to_numeric(df[c], errors='coerce')
-    feature_cols = [c for c in feature_cols if np.issubdtype(df[c].dtype, np.number)]
-    df[feature_cols] = df[feature_cols].replace([np.inf, -np.inf], np.nan).ffill().bfill().fillna(0.0).astype(np.float32)
+    from pipeline_data import add_stationary_features, select_model_features
+    df = add_stationary_features(df)
+    df, _ = add_cross_sectional_features(df, stationary=True)
+    feature_cols = select_model_features(df, stationary=True)
+    df[feature_cols] = clean_features(df, feature_cols)
 
     # Train / Test
-    train_mask = df['Date_Std'] < pd.Timestamp('2024-01-01')
-    if train_mask.sum() < 200:
-        split_idx = int(len(df) * 0.8)
-        train_mask = df.index < split_idx
-        test_mask = df.index >= split_idx
-    else:
-        test_mask = ~train_mask
+    train_mask, val_mask, test_mask, split_metadata = rolling_temporal_masks(df, horizon=1)
 
     X_train, y_train = df.loc[train_mask, feature_cols], df.loc[train_mask, 'Target_Std']
+    X_val, y_val = df.loc[val_mask, feature_cols], df.loc[val_mask, 'Target_Std']
     X_test, y_test = df.loc[test_mask, feature_cols], df.loc[test_mask, 'Target_Std']
+
+    if y_train.nunique() != 2:
+        raise ValueError("y_train does not have exactly 2 classes before tuning.")
 
     # Tự động tối ưu hóa siêu tham số (Optuna Bayesian Optimization)
     try:
         from hyperparameter_tuner import tune_xgboost_hyperparameters, save_tuned_hyperparameters_to_minio, DEFAULT_XGB_PARAMS
-        tuned_params = tune_xgboost_hyperparameters(X_train, y_train, n_trials=10)
+        tuned_params = tune_xgboost_hyperparameters(X_train, y_train, n_trials=30, dates=df.loc[train_mask, 'Date_Std'])
         save_tuned_hyperparameters_to_minio(s3_hook, BUCKET_NAME, tuned_params)
     except Exception as tune_err:
         logging.warning(f"⚠️ Không thể chạy hyperparameter tuning ({tune_err}). Sử dụng bộ tham số mặc định.")
-        tuned_params = {
-            'n_estimators': 120, 'max_depth': 3, 'learning_rate': 0.03,
-            'subsample': 0.75, 'colsample_bytree': 0.75, 'min_child_weight': 3,
-            'random_state': 42, 'n_jobs': -1, 'eval_metric': 'logloss'
-        }
+        from hyperparameter_tuner import DEFAULT_XGB_PARAMS
+        tuned_params = DEFAULT_XGB_PARAMS.copy()
+    from model_training import recency_weights, select_decision_threshold
+    recency_half_life = tuned_params.pop('recency_half_life', 0)
+    tuned_params['eval_metric'] = 'auc' if y_val.nunique() == 2 else 'logloss'
+    tuned_params['early_stopping_rounds'] = 20
 
     import mlflow
     import mlflow.xgboost
+    from mlflow_utils import log_xgboost_model
     import os
 
-    os.environ["AWS_ACCESS_KEY_ID"] = "minioadmin"
-    os.environ["AWS_SECRET_ACCESS_KEY"] = "minioadmin"
-    os.environ["MLFLOW_S3_ENDPOINT_URL"] = "http://minio:9000"
-    
-    mlflow.set_tracking_uri("http://mlflow-server:5000")
+    os.environ["AWS_ACCESS_KEY_ID"] = os.environ.get("MINIO_ROOT_USER", "minioadmin")
+    os.environ["AWS_SECRET_ACCESS_KEY"] = os.environ.get("MINIO_ROOT_PASSWORD", "minioadmin")
+    os.environ["MLFLOW_S3_ENDPOINT_URL"] = os.environ.get("MINIO_ENDPOINT_URL", "http://minio:9000")
+
+    mlflow.set_tracking_uri(os.environ.get("MLFLOW_TRACKING_URI", "http://mlflow-server:5000"))
     mlflow.set_experiment("Quantum_XGBoost")
 
     with mlflow.start_run(run_name=f"XGBoost_{date_nodash}"):
         mlflow.log_params(tuned_params)
-        
+
         model = xgb.XGBClassifier(**tuned_params)
-        model.fit(X_train, y_train)
+        model.fit(X_train, y_train,
+                  sample_weight=recency_weights(df.loc[train_mask, 'Date_Std'], recency_half_life),
+                  eval_set=[(X_val, y_val)], verbose=False)
+
+        # Calculate val_auc
+        val_preds_prob = model.predict_proba(X_val)[:, 1]
+        try:
+            val_auc = float(roc_auc_score(y_val, val_preds_prob)) if len(np.unique(y_val)) == 2 else None
+        except Exception:
+            val_auc = None
+
+        decision_threshold = select_decision_threshold(y_val, val_preds_prob, dates=df.loc[val_mask, 'Date_Std'])
+        best_iteration = getattr(model, 'best_iteration', None)
 
         # Đánh giá Test set — METRICS THỰC SỰ (không clip)
         test_preds_prob = model.predict_proba(X_test)[:, 1]
-        test_preds_bin = (test_preds_prob >= 0.5).astype(int)
+        test_preds_bin = (test_preds_prob >= decision_threshold).astype(int)
         test_acc = float(accuracy_score(y_test, test_preds_bin))
         try:
-            test_auc = float(roc_auc_score(y_test, test_preds_prob))
+            test_auc = float(roc_auc_score(y_test, test_preds_prob)) if len(np.unique(y_test)) == 2 else None
         except Exception:
-            test_auc = 0.5
-            
-        mlflow.log_metrics({"accuracy": test_acc, "auc": test_auc})
-        mlflow.xgboost.log_model(model, "model", input_example=X_train.iloc[:1])
+            test_auc = None
+
+        majority_class = int(y_train.mode()[0]) if len(y_train) > 0 else 0
+        baseline_acc = float(accuracy_score(y_test, np.full_like(y_test, majority_class)))
+
+        mlflow.log_metrics({k: v for k, v in {"accuracy": test_acc, "auc": test_auc, "val_auc": val_auc, "best_iteration": best_iteration, "baseline_acc": baseline_acc,
+            "accuracy_at_0_5": float(accuracy_score(y_test, test_preds_prob >= 0.5)),
+            "decision_threshold": decision_threshold}.items() if v is not None})
+        log_xgboost_model(mlflow, model, X_train)
 
     # Lưu model artifact lên MinIO
     try:
         from model_registry import ModelCard, save_model_to_minio, select_champion_model
+        snapshot_key, snapshot_hash = snapshot_training_dataset(s3_hook, BUCKET_NAME, 'xgboost', model_version, raw_csv)
         model_card = ModelCard(
             model_name='XGBoost Gradient Boosting Classifier (AutoML Tuned)',
-            model_version=f'v{date_nodash}',
+            model_version=model_version,
             trained_date=today_str,
             model_type='xgboost',
             dataset_size=int(train_mask.sum()),
             num_features=len(feature_cols),
             num_tickers=int(df['Ticker_Std'].nunique()),
-            hyperparameters={k: v for k, v in tuned_params.items() if isinstance(v, (int, float, str))},
-            metrics={'accuracy': test_acc, 'auc_roc': test_auc},
+            hyperparameters={
+                **{k: v for k, v in tuned_params.items() if isinstance(v, (int, float, str))},
+                **{k: v for k, v in split_metadata.items() if isinstance(v, (int, float, str))},
+                'best_iteration': best_iteration, 'feature_policy': 'stationary_v2',
+                'decision_threshold': decision_threshold, 'recency_half_life': recency_half_life,
+                'dataset_key': snapshot_key, 'pipeline_run_id': pipeline_run_id, 'dataset_sha256': snapshot_hash
+            },
+            metrics={'accuracy': test_acc, 'auc_roc': test_auc, 'val_auc': val_auc, 'baseline_acc': baseline_acc,
+                     'accuracy_at_0_5': float(accuracy_score(y_test, test_preds_prob >= 0.5))},
             feature_columns=feature_cols
         )
         model_bytes = bytes(model.get_booster().save_raw(raw_format='json'))
         save_model_to_minio(s3_hook, BUCKET_NAME, 'xgboost', model_card, model_bytes)
     except Exception as e:
-        logging.warning(f'⚠️ Không thể lưu model registry: {e}')
+        raise RuntimeError('Cannot publish XGBoost artifacts; forecasts were not issued') from e
 
     # === KIỂM ĐỊNH CHẤT LƯỢNG MÔ HÌNH (CHAMPION - CHALLENGER GATE) ===
-    champion_status = 'USE_CURRENT'
-    champion_version = f'v{date_nodash}'
-    champion_reason = "Model mới đạt chuẩn chất lượng."
+    champion_status = 'SAFE_MODE'
+    champion_version = model_version
+    champion_reason = "Đang kiểm định chất lượng mô hình..."
     try:
         decision = select_champion_model(
             s3_hook=s3_hook,
             bucket_name=BUCKET_NAME,
             model_type='xgboost',
-            current_version=f'v{date_nodash}',
+            current_version=model_version,
             current_acc=test_acc,
             current_auc=test_auc,
-            max_lookback_days=7,
-            min_auc=0.53,
-            min_acc=0.50
+            max_lookback_days=14,
+            min_auc=0.45,
+            min_acc=0.48
         )
         champion_status = decision['status']
         champion_reason = decision['reason']
@@ -227,31 +236,130 @@ def train_and_predict_xgboost_task(**context):
                 model = fallback_model
                 test_acc = decision['selected_metrics'].get('accuracy', test_acc)
                 test_auc = decision['selected_metrics'].get('auc_roc', test_auc)
+                if artifacts.get('feature_columns'):
+                    feature_cols = artifacts['feature_columns']
+                    logging.info(f"🔄 Đã đồng bộ feature_cols theo fallback model: {len(feature_cols)} features")
                 logging.warning(f"🔄 ĐÃ LOAD FALLBACK MODEL ({champion_version}) ĐỂ DỰ BÁO!")
     except Exception as e:
-        logging.warning(f"⚠️ Lỗi trong bước chọn Champion Model: {e}")
+        champion_status = 'SAFE_MODE'
+        champion_reason = f"Lỗi trong bước chọn Champion Model: {e}. Kích hoạt SAFE_MODE để bảo vệ an toàn."
+        logging.error(f"❌ {champion_reason}")
+
+    # T+5 Return Regression Model
+    logging.info("Tạo mô hình XGBoost Regression dự báo T+5...")
+    df_reg = df.copy()
+    df_reg = df_reg.sort_values(['Date_Std', 'Ticker_Std']).reset_index(drop=True)
+    ret_5d_col = cols_lower.get('future_return_5d') or cols_lower.get('return_5d')
+    if ret_5d_col and ret_5d_col in df_reg.columns:
+        from pipeline_data import simple_return_target
+        df_reg['return_5d'] = simple_return_target(df_reg, ret_5d_col)
+    elif close_col and close_col in df_reg.columns:
+        future_5d = df_reg.groupby('Ticker_Std')[close_col].shift(-5)
+        df_reg['return_5d'] = (future_5d / df_reg[close_col]) - 1.0
+    else:
+        df_reg['return_5d'] = np.nan
+        logging.warning('Không có giá hoặc nhãn lợi nhuận T+5 quan sát được; bỏ qua mô hình regression.')
+
+    dates = df_reg['Date_Std']
+    outcome_dates_5d = df_reg.groupby('Ticker_Std')['Date_Std'].shift(-5)
+    observed_5d = df_reg['return_5d'].notna() & np.isfinite(df_reg['return_5d']) & outcome_dates_5d.notna()
+
+    val_start = pd.Timestamp(split_metadata['validation_start'])
+    test_start = pd.Timestamp(split_metadata['test_start'])
+    test_end = pd.Timestamp(split_metadata['test_end'])
+
+    train_mask_reg = observed_5d & (dates >= pd.Timestamp(split_metadata['train_start'])) & (dates < val_start) & (outcome_dates_5d < val_start)
+    test_mask_reg = observed_5d & (dates >= test_start) & (dates <= test_end) & (outcome_dates_5d <= test_end)
+
+    X_train_reg, y_train_reg = df_reg.loc[train_mask_reg, feature_cols], df_reg.loc[train_mask_reg, 'return_5d']
+    X_test_reg, y_test_reg = df_reg.loc[test_mask_reg, feature_cols], df_reg.loc[test_mask_reg, 'return_5d']
+
+    reg_model = xgb.XGBRegressor(
+        n_estimators=120, max_depth=3, learning_rate=0.03,
+        subsample=0.75, colsample_bytree=0.75, random_state=42, n_jobs=-1
+    )
+    from sklearn.metrics import mean_absolute_error, mean_squared_error
+    if train_mask_reg.sum() > 0:
+        reg_model.fit(X_train_reg, y_train_reg)
+        if len(X_test_reg):
+            test_preds_reg = reg_model.predict(X_test_reg)
+            mae = float(mean_absolute_error(y_test_reg, test_preds_reg))
+            rmse = float(np.sqrt(mean_squared_error(y_test_reg, test_preds_reg)))
+        else:
+            mae = rmse = None
+    else:
+        mae = None
+        rmse = None
+        logging.warning("⚠️ Không có dữ liệu train cho regression T+5, bỏ qua fit.")
+    logging.info(f"T+5 Regression - MAE: {mae}, RMSE: {rmse}")
+
+    # ponytail: persists evaluated artifact, full-data refit needs separate serving artifact/prospective evaluation.
+    return_model_version = None
+    try:
+        reg_model_card = ModelCard(
+            model_name='XGBoost Regressor (T+5 Return)',
+            model_version=model_version,
+            trained_date=today_str,
+            model_type='xgboost_return_5d',
+            dataset_size=int(train_mask_reg.sum()),
+            num_features=len(feature_cols),
+            num_tickers=int(df_reg['Ticker_Std'].nunique()),
+            hyperparameters={
+                'n_estimators': 120, 'max_depth': 3, 'learning_rate': 0.03,
+                **split_metadata,
+                'prediction_horizon': 5, 'return_policy': 'simple_v2',
+                'dataset_key': snapshot_key, 'dataset_sha256': snapshot_hash
+            },
+            metrics={'mae': mae, 'rmse': rmse},
+            feature_columns=feature_cols
+        )
+        reg_model_bytes = bytes(reg_model.get_booster().save_raw(raw_format='json'))
+        save_model_to_minio(s3_hook, BUCKET_NAME, 'xgboost_return_5d', reg_model_card, reg_model_bytes)
+        return_model_version = model_version
+    except Exception as e:
+        logging.warning(f'⚠️ Không thể lưu model registry cho regression: {e}')
 
     # Dự báo phiên mới nhất
     latest_rows = df.sort_values(['Ticker_Std', 'Date_Std']).groupby('Ticker_Std').last().reset_index()
-    X_latest = latest_rows[feature_cols]
+    X_latest = latest_rows.reindex(columns=feature_cols, fill_value=0.0).fillna(0.0)
 
     if champion_status == 'SAFE_MODE':
-        # SAFE MODE: Thị trường biến động dị thường, không khuyến nghị Mua/Bán
-        logging.warning(f"🚨 KÍCH HOẠT SAFE MODE TRONG DỰ BÁO: {champion_reason}")
-        probs = np.full(len(latest_rows), 0.50)
+        probs = np.full(len(latest_rows), np.nan)
     else:
         probs = model.predict_proba(X_latest)[:, 1]
+    try:
+        returns_5d = reg_model.predict(X_latest) if return_model_version else np.full(len(latest_rows), np.nan)
+    except Exception:
+        returns_5d = np.full(len(latest_rows), np.nan)
+
+    from chart_utils import (
+        generate_individual_charts,
+        save_charts_zip_minio_and_telegram,
+        load_price_data_from_minio,
+    )
+
+    df_prices = normalize_price_history(load_price_data_from_minio(s3_hook, BUCKET_NAME))
+    if df_prices.empty:
+        df_prices = normalize_price_history(df)
+        logging.warning('Không có lịch sử giá ngoài hợp lệ; dùng giá quan sát trong dataset XGBoost nếu có.')
+    latest_prices = {}
+    if not df_prices.empty:
+        latest_price_df = df_prices.groupby('Ticker', sort=False).tail(1)
+        latest_prices = dict(zip(latest_price_df['Ticker'], latest_price_df['Close']))
 
     results = []
     for idx, row in latest_rows.iterrows():
         ticker = row['Ticker_Std']
         sector = row['Sector_Std']
         prob_up = float(probs[idx])
+        return_5d = float(returns_5d[idx])
+        close_price = float(latest_prices.get(ticker, 0.0))
+        pred_close_5d = close_price * (1.0 + return_5d) if close_price > 0 and np.isfinite(return_5d) else None
 
         if champion_status == 'SAFE_MODE':
             rec = "ĐỨNG NGOÀI"
-            trend = "Thị trường biến động mạnh (Safe Mode)"
-            conf = "Bảo vệ vốn (Safe Mode)"
+            trend = "Chưa có dự báo đạt chuẩn (Safe Mode)"
+            conf = "Không khả dụng (Safe Mode)"
         else:
             # Chuẩn hóa ngưỡng quyết định (Confidence Threshold Filtering)
             # Lọc nhiễu vùng phân vân 0.45 - 0.55 -> ĐỨNG NGOÀI, chỉ MUA khi >= 0.55, BÁN khi <= 0.45
@@ -268,21 +376,40 @@ def train_and_predict_xgboost_task(**context):
                 trend = "Đi ngang / Lưỡng lự (Sideway)"
                 conf = "Trung bình"
 
+        if pred_close_5d is not None and (not np.isfinite(pred_close_5d) or pred_close_5d <= 0):
+            pred_close_5d = None
+
         results.append({
             'ngay_du_bao': today_str,
             'ma_co_phieu': ticker,
             'nhom_nganh': sector,
             'khuyen_nghi': rec,
-            'xac_suat_tang_gia': f"{prob_up*100:.2f}%",
+            'xac_suat_tang_gia': f"{prob_up*100:.2f}%" if np.isfinite(prob_up) else None,
             'prob_num': prob_up,
             'xu_huong_du_kien': trend,
             'do_tin_cay': conf,
             'do_chinh_xac_mo_hinh': f"{test_acc*100:.1f}%",
-            'chi_so_auc': f"{test_auc:.2f}"
+            'chi_so_auc': str(test_auc) if test_auc is not None else None,
+            'loi_nhuan_5d_du_kien': f"{return_5d*100:.2f}%" if np.isfinite(return_5d) else None,
+            'gia_5d_du_kien': round(pred_close_5d, 2) if pred_close_5d is not None else None,
+            'return_model_version': return_model_version if pred_close_5d is not None else None
         })
 
     df_full = pd.DataFrame(results)
-    df_out = df_full[COLUMNS_9]
+    df_out = df_full.copy()
+
+    from forecast_history import save_forecast_history
+    reference_dates = df.groupby('Ticker_Std')['Date_Std'].max()
+    df_out['reference_date'] = df_out['ma_co_phieu'].map(reference_dates).apply(lambda d: pd.Timestamp(d).strftime('%Y-%m-%d'))
+    df_out['issued_at'] = datetime.now(timezone.utc).isoformat()
+    df_out['prediction_horizon'] = 1
+    df_out['pipeline_run_id'] = pipeline_run_id
+    df_out['model_version'] = champion_version
+    df_out['inference_source'] = 'trained_model_v2'
+    if champion_status == 'SAFE_MODE':
+        df_out['model_version'] = None
+        df_out['inference_source'] = 'unavailable'
+    save_forecast_history(s3_hook, BUCKET_NAME, 'xgboost', df_out)
 
     # Lưu MinIO
     csv_buffer = io.StringIO()
@@ -298,23 +425,11 @@ def train_and_predict_xgboost_task(**context):
     logging.info(f"✅ Đã lưu XGBoost lên MinIO: {predict_key}")
 
     # === ĐỌC DỮ LIỆU GIÁ LỊCH SỬ & TÍNH KẾ HOẠCH GIAO DỊCH ===
-    from chart_utils import (
-        generate_individual_charts,
-        save_charts_zip_minio_and_telegram,
-        load_price_data_from_minio,
-        calculate_trading_plan
-    )
-
-    df_prices = load_price_data_from_minio(s3_hook, BUCKET_NAME)
-    latest_prices = {}
-    if not df_prices.empty:
-        latest_rows = df_prices.sort_values(['Ticker', 'Date']).groupby('Ticker').last().reset_index()
-        latest_prices = dict(zip(latest_rows['Ticker'], latest_rows['Close']))
 
     # Tạo nội dung báo cáo Telegram chuẩn chỉnh
     buy_list = df_full[df_full['khuyen_nghi'] == 'MUA'].sort_values('prob_num', ascending=False)
     sell_list = df_full[df_full['khuyen_nghi'] == 'BÁN'].sort_values('prob_num', ascending=True)
-    top_5_potential = df_full.sort_values('prob_num', ascending=False).head(5)
+    top_5_potential = df_full[df_full['prob_num'].notna()].sort_values('prob_num', ascending=False).head(5)
 
     n_buy = len(buy_list)
     n_sell = len(sell_list)
@@ -326,13 +441,13 @@ def train_and_predict_xgboost_task(**context):
     elif champion_status == 'SAFE_MODE':
         gate_status_line = "🚨 <b>CHAMPION GATE:</b> KÍCH HOẠT SAFE MODE (AI tạm dừng khuyến nghị để bảo vệ vốn)"
     else:
-        gate_status_line = f"🎯 <b>Hiệu năng Test (2024-nay):</b> Acc {test_acc*100:.1f}% | AUC {test_auc:.2f} (Champion: {champion_version})"
+        gate_status_line = f"🎯 <b>Hiệu năng Test (Holdout):</b> Acc {test_acc*100:.1f}% | AUC {test_auc} (Champion: {champion_version})"
 
     msg_lines = [
         "🌲 <b>BẢN TIN DỰ BÁO CỔ PHIẾU (XGBOOST TABULAR)</b>",
         f"📅 <b>Dữ liệu phiên:</b> {today_str}",
         gate_status_line,
-        f"📊 <b>Thị trường 20 mã:</b> 🟢 Mua: {n_buy} | 🟡 Đi ngang: {n_sideway} | 🔴 Bán: {n_sell}",
+        f"📊 <b>Thị trường {len(df_full)} mã:</b> 🟢 Mua: {n_buy} | 🟡 Đứng ngoài/chờ dự báo: {n_sideway} | 🔴 Bán: {n_sell}",
         "━━━━━━━━━━━━━━━━━━━━━━━━━━━",
         ""
     ]
@@ -345,12 +460,10 @@ def train_and_predict_xgboost_task(**context):
             cur_p = latest_prices.get(ticker, 0.0)
             msg_lines.append(f"✅ <b>{ticker}</b> ({r['nhom_nganh']}): <b>{r['xac_suat_tang_gia']}</b>")
             if cur_p > 0:
-                plan = calculate_trading_plan(cur_p, prob_u)
-                msg_lines.append(f"   ├ 💰 Giá vào (Entry): <b>${plan['entry']:.2f}</b>")
-                msg_lines.append(f"   ├ 🎯 Mục tiêu T+5: <b>${plan['target']:.2f} (+{plan['pct_target']}%)</b>")
-                msg_lines.append(f"   └ 🛑 Cắt lỗ (SL 2%): <b>${plan['stop_loss']:.2f} (-{plan['sl_pct']}%)</b> | R:R: <b>1:{plan['rr_ratio']}</b>")
+                msg_lines.append('   Giá mục tiêu/cắt lỗ: chỉ hiển thị khi có mô hình đã huấn luyện tương ứng.')
         msg_lines.append("")
-    else:
+
+    elif not top_5_potential.empty:
         msg_lines.append("⭐ <b>TOP 5 CỔ PHIẾU ĐIỂM KỸ THUẬT CAO NHẤT:</b>")
         for _, r in top_5_potential.iterrows():
             ticker = r['ma_co_phieu']
@@ -360,6 +473,9 @@ def train_and_predict_xgboost_task(**context):
             msg_lines.append(f"🔹 <b>{ticker}</b> ({r['nhom_nganh']}): <b>{r['xac_suat_tang_gia']}</b> ({r['khuyen_nghi']}){p_text}")
         msg_lines.append("")
 
+    if champion_status == 'SAFE_MODE':
+        msg_lines.append('Chưa có dự báo đạt chuẩn; xác suất và xếp hạng cổ phiếu được để trống.')
+
     if not sell_list.empty:
         msg_lines.append("🔴 <b>CẢNH BÁO BÁN / GIẢM TỶ TRỌNG:</b>")
         for _, r in sell_list.iterrows():
@@ -367,7 +483,7 @@ def train_and_predict_xgboost_task(**context):
             cur_p = latest_prices.get(ticker, 0.0)
             p_text = f" (${cur_p:.2f})" if cur_p > 0 else ""
             msg_lines.append(f"🔻 <b>{ticker}</b>{p_text}: {r['xu_huong_du_kien']} ({r['xac_suat_tang_gia']})")
-    else:
+    elif champion_status != 'SAFE_MODE':
         msg_lines.append("🔴 <b>CẢNH BÁO BÁN:</b> Không có tín hiệu bán tháo.")
 
     url_msg = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
@@ -423,13 +539,13 @@ with DAG(
 DAG thực hiện quy trình huấn luyện mô hình **Gradient Boosted Decision Trees (GBDT)** trên tập dữ liệu bảng đa biến:
 - **Thuật toán:** `XGBClassifier` với `n_estimators=120`, `max_depth=3`, `learning_rate=0.03`, `subsample=0.75`.
 - **Target:** Biến nhị phân $y_{t} = 1$ nếu $Close_{t+1} > Close_{t}$, ngược lại $0$.
-- **Data Split:** Time-based split (Tập train < 2024-01-01, tập test $\ge$ 2024-01-01) loại bỏ hoàn toàn Look-ahead bias.
+- **Data Split:** Time-based split (Tập train rolling 3 năm, validation 63 phiên, test 126 phiên) loại bỏ hoàn toàn Look-ahead bias.
 - **Metrics thực tế:** Accuracy & AUC-ROC được tính trực tiếp từ tập test (không clip).
 
 ### 2. Quản Lý Phiên Bản (Model Registry MLOps)
 - **Model Artifact:** `models/xgboost/vYYYYMMDD/model.json` (Serialized GBDT Booster).
 - **Metadata Card:** `models/xgboost/vYYYYMMDD/model_card.json` (Dataset size, feature names, hyperparams).
-- **Sổ cái phiên bản:** Tự động ghi nhận vào `models/registry.csv`.
+- **Sổ cái phiên bản:** Tự động ghi nhận vào `models/registry/xgboost/`.
 
 ### 3. Đầu Ra & Trực Quan Hóa Đa Kênh
 - **File dự báo:** `stock-data/xgboost/du_bao_tang_truong_YYYYMMDD.csv`

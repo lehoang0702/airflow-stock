@@ -3,17 +3,21 @@ MODULE: MODEL REGISTRY — XÂY DỰNG & QUẢN LÝ MÔ HÌNH
 =====================================================
 Đóng gói toàn bộ logic xây dựng, serialize, lưu trữ và quản lý phiên bản mô hình.
 
-Schema MinIO:
-    models/xgboost/v{YYYYMMDD}/model.json + model_card.json + feature_columns.json
-    models/lstm/v{YYYYMMDD}/model.pt + scaler.pkl + model_card.json + feature_columns.json
-    models/finbert/v{YYYYMMDD}/pipeline_config.json + model_card.json + sentiment_stats.json
-    models/registry.csv
+Schema MinIO (version = UTC timestamp + unique suffix):
+    models/xgboost/<version>/model.json + model_card.json + feature_columns.json
+    models/lstm/<version>/model.pt + scaler.pkl + model_card.json + feature_columns.json
+    models/finbert/<version>/model_card.json + sentiment_outputs.json
+    models/registry/<model_type>/<version>.json (legacy: models/registry.csv)
 """
+
+from pipeline_data import (prepare_target, clean_features, temporal_masks, create_sequences,
+                           add_stationary_features, select_model_features)
 
 import io
 import json
 import logging
 import pickle
+from pipeline_storage import new_model_version, version_date
 from dataclasses import dataclass, field, asdict
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
@@ -92,13 +96,13 @@ class XGBoostModelBuilder:
         self.feature_cols = []
         self.model_card = None
 
-    def preprocess(self, df: pd.DataFrame) -> Tuple[pd.DataFrame, List[str]]:
+    def preprocess(self, df: pd.DataFrame, feature_policy='legacy') -> Tuple[pd.DataFrame, List[str]]:
         """Tiền xử lý dữ liệu: chuẩn hóa cột, tạo target, lọc features."""
         cols_lower = {c.lower(): c for c in df.columns}
         date_col = cols_lower.get('date') or cols_lower.get('datetime') or df.columns[0]
         ticker_col = cols_lower.get('symbol') or cols_lower.get('ticker') or cols_lower.get('ma_co_phieu')
         sector_col = cols_lower.get('sector') or cols_lower.get('nhom_nganh')
-        close_col = cols_lower.get('close') or cols_lower.get('adj close')
+        close_col = cols_lower.get('close') or cols_lower.get('adj close') or cols_lower.get('adj_close')
 
         df['Date_Std'] = pd.to_datetime(df[date_col], errors='coerce').dt.tz_localize(None)
         df['Ticker_Std'] = df[ticker_col] if ticker_col else 'UNKNOWN'
@@ -106,32 +110,15 @@ class XGBoostModelBuilder:
 
         # Target: giá phiên sau > giá phiên hiện tại
         target_col = cols_lower.get('future_direction_1d') or cols_lower.get('target')
-        if target_col:
-            df['Target_Std'] = df[target_col].astype(int)
-        elif close_col:
-            df['Target_Std'] = (df.groupby('Ticker_Std')[close_col].shift(-1) > df[close_col]).astype(int)
-        else:
-            df['Target_Std'] = (df.index % 2 == 0).astype(int)
+        df = prepare_target(df, target_col, close_col)
 
-        # Lọc features (loại bỏ triệt để data leakage và future columns)
-        def is_leakage_col(col_name: str) -> bool:
-            c = col_name.lower()
-            if c in ['date_std', 'ticker_std', 'sector_std', 'target_std', 'split_set']:
-                return True
-            if any(c.startswith(p) for p in ['future', 'target', 'label']):
-                return True
-            if c in ['open', 'high', 'low', 'close', 'adj close', 'volume', 'symbol', 'ticker', 'date', 'datetime', 'sector']:
-                return True
-            if 'unnamed' in c:
-                return True
-            return False
-
-        feature_cols = [c for c in df.columns if not is_leakage_col(c)]
-
-        for c in feature_cols:
-            df[c] = pd.to_numeric(df[c], errors='coerce')
-        feature_cols = [c for c in feature_cols if np.issubdtype(df[c].dtype, np.number)]
-        df[feature_cols] = df[feature_cols].replace([np.inf, -np.inf], np.nan).ffill().bfill().fillna(0.0).astype(np.float32)
+        from pipeline_data import add_cross_sectional_features
+        stationary = feature_policy == 'stationary_v2'
+        if stationary:
+            df = add_stationary_features(df)
+        df, _ = add_cross_sectional_features(df, stationary=stationary)
+        feature_cols = select_model_features(df, stationary=stationary)
+        df[feature_cols] = clean_features(df, feature_cols)
 
         self.feature_cols = feature_cols
         return df, feature_cols
@@ -144,13 +131,7 @@ class XGBoostModelBuilder:
         df, feature_cols = self.preprocess(df)
 
         # Split train/test theo thời gian
-        train_mask = df['Date_Std'] < pd.Timestamp(train_cutoff)
-        if train_mask.sum() < 200:
-            split_idx = int(len(df) * 0.8)
-            train_mask = df.index < split_idx
-            test_mask = df.index >= split_idx
-        else:
-            test_mask = ~train_mask
+        train_mask, test_mask = temporal_masks(df, train_cutoff)
 
         X_train = df.loc[train_mask, feature_cols]
         y_train = df.loc[train_mask, 'Target_Std']
@@ -166,9 +147,9 @@ class XGBoostModelBuilder:
         test_preds = (test_probs >= 0.5).astype(int)
         test_acc = float(accuracy_score(y_test, test_preds))
         try:
-            test_auc = float(roc_auc_score(y_test, test_probs))
+            test_auc = float(roc_auc_score(y_test, test_probs)) if len(np.unique(y_test)) == 2 else None
         except Exception:
-            test_auc = 0.5
+            test_auc = None
 
         # Tạo model card
         date_nodash = datetime.now().strftime("%Y%m%d")
@@ -177,7 +158,7 @@ class XGBoostModelBuilder:
 
         self.model_card = ModelCard(
             model_name="XGBoost Gradient Boosting Classifier",
-            model_version=f"v{date_nodash}",
+            model_version=new_model_version(),
             trained_date=datetime.now().strftime("%Y-%m-%d"),
             model_type="xgboost",
             dataset_size=int(train_mask.sum()),
@@ -192,7 +173,7 @@ class XGBoostModelBuilder:
         )
 
         metrics = {'accuracy': test_acc, 'auc_roc': test_auc}
-        logging.info(f"✅ XGBoost đã train xong | Acc: {test_acc*100:.2f}% | AUC: {test_auc:.4f}")
+        logging.info(f"✅ XGBoost đã train xong | Acc: {test_acc*100:.2f}% | AUC: {test_auc}")
         return metrics
 
     def serialize(self) -> bytes:
@@ -235,7 +216,13 @@ class XGBoostModelBuilder:
         """Dự báo xác suất tăng giá cho các hàng cuối cùng."""
         if self.model is None:
             raise ValueError("Model chưa được train hoặc load!")
-        X = df[self.feature_cols].replace([np.inf, -np.inf], np.nan).ffill().bfill().fillna(0.0).astype(np.float32)
+        ticker_col = 'Ticker_Std' if 'Ticker_Std' in df.columns else ('Ticker' if 'Ticker' in df.columns else None)
+        if ticker_col:
+            X = df.groupby(ticker_col)[self.feature_cols].transform(
+                lambda grp: grp.replace([np.inf, -np.inf], np.nan).ffill()
+            ).fillna(0.0).astype(np.float32)
+        else:
+            X = df[self.feature_cols].replace([np.inf, -np.inf], np.nan).ffill().fillna(0.0).astype(np.float32)
         return self.model.predict_proba(X)[:, 1]
 
 
@@ -258,7 +245,7 @@ class LSTMModelBuilder:
         'batch_size': 128,
         'epochs': 15,
         'lookback': 30,
-        'temperature': 2.5
+        'temperature': 1.0
     }
 
     def __init__(self, hyperparams: Optional[Dict] = None):
@@ -280,7 +267,7 @@ class LSTMModelBuilder:
                          num_layers=hp['num_layers'], dropout=hp['dropout']):
                 super(CalibratedStackedLSTM, self).__init__()
                 self.lstm = nn.LSTM(input_dim, hidden_dim, num_layers=num_layers,
-                                   batch_first=True, dropout=dropout)
+                                   batch_first=True, dropout=dropout if num_layers > 1 else 0.0)
                 self.ln = nn.LayerNorm(hidden_dim)
                 self.fc = nn.Sequential(
                     nn.Linear(hidden_dim, 24),
@@ -296,60 +283,36 @@ class LSTMModelBuilder:
         self._model_class = CalibratedStackedLSTM
         return CalibratedStackedLSTM
 
-    def preprocess(self, df: pd.DataFrame) -> Tuple[pd.DataFrame, List[str]]:
+    def preprocess(self, df: pd.DataFrame, feature_policy='legacy') -> Tuple[pd.DataFrame, List[str]]:
         """Tiền xử lý dữ liệu cho LSTM."""
         cols_lower = {c.lower(): c for c in df.columns}
         date_col = cols_lower.get('date') or cols_lower.get('datetime') or df.columns[0]
         ticker_col = cols_lower.get('ticker') or cols_lower.get('symbol') or cols_lower.get('ma_co_phieu')
         sector_col = cols_lower.get('sector') or cols_lower.get('nhom_nganh')
-        close_col = cols_lower.get('close') or cols_lower.get('adj close')
+        close_col = cols_lower.get('close') or cols_lower.get('adj close') or cols_lower.get('adj_close')
 
         df['Date_Std'] = pd.to_datetime(df[date_col]).dt.tz_localize(None)
         df['Ticker_Std'] = df[ticker_col] if ticker_col else 'UNKNOWN'
         df['Sector_Std'] = df[sector_col] if sector_col else 'General'
 
         target_col = cols_lower.get('future_direction_1d') or cols_lower.get('target')
-        if target_col:
-            df['Target_Std'] = df[target_col].astype(float)
-        elif close_col:
-            df['Target_Std'] = (df.groupby('Ticker_Std')[close_col].shift(-1) > df[close_col]).astype(float)
-        else:
-            df['Target_Std'] = (df.index % 2 == 0).astype(float)
+        df = prepare_target(df, target_col, close_col)
 
-        # Lọc features — loại bỏ giá thô để tránh bullish bias
-        raw_price_keywords = ['close', 'open', 'high', 'low', 'adj close', 'volume',
-                              'date', 'ticker', 'symbol', 'sector', 'target']
-        feature_cols = []
-        for c in df.columns:
-            c_low = c.lower()
-            if (not any(k == c_low for k in raw_price_keywords)
-                    and 'target' not in c_low
-                    and c not in ['Date_Std', 'Ticker_Std', 'Sector_Std', 'Target_Std']):
-                df[c] = pd.to_numeric(df[c], errors='coerce')
-                if np.issubdtype(df[c].dtype, np.number):
-                    feature_cols.append(c)
+        from pipeline_data import add_cross_sectional_features
+        stationary = feature_policy == 'stationary_v2'
+        if stationary:
+            df = add_stationary_features(df)
+        df, _ = add_cross_sectional_features(df, stationary=stationary)
+        feature_cols = select_model_features(df, stationary=stationary)
 
-        df[feature_cols] = df[feature_cols].replace([np.inf, -np.inf], np.nan).ffill().bfill().fillna(0.0).astype(np.float32)
+        df[feature_cols] = clean_features(df, feature_cols)
         df = df.sort_values(['Date_Std', 'Ticker_Std']).reset_index(drop=True)
 
         self.feature_cols = feature_cols
         return df, feature_cols
 
-    def _create_sequences(self, data_group, feature_cols, lookback):
-        """Tạo sliding windows cho LSTM."""
-        X, y = [], []
-        for _, grp in data_group.groupby('Ticker_Std'):
-            feats = grp[feature_cols].values
-            targets = grp['Target_Std'].values
-            n = len(feats)
-            if n <= lookback:
-                continue
-            for i in range(lookback, n):
-                X.append(feats[i - lookback:i])
-                y.append(targets[i])
-        if not X:
-            return np.empty((0, lookback, len(feature_cols))), np.empty((0,))
-        return np.array(X, dtype=np.float32), np.array(y, dtype=np.float32)
+    def _create_sequences(self, data_group, feature_cols, lookback, mask=None):
+        return create_sequences(data_group, feature_cols, lookback, mask=mask)
 
     def train(self, df: pd.DataFrame, train_cutoff: str = '2024-01-01') -> Dict[str, float]:
         """Train mô hình LSTM và trả về metrics thực sự (KHÔNG clip)."""
@@ -365,17 +328,21 @@ class LSTMModelBuilder:
         hp = self.hyperparams
         lookback = hp['lookback']
 
-        train_df = df[df['Date_Std'] < train_cutoff].copy()
-        test_df = df[df['Date_Std'] >= train_cutoff].copy()
-
         # Chuẩn hóa features
         self.scaler = StandardScaler()
-        train_df[feature_cols] = self.scaler.fit_transform(train_df[feature_cols].values)
-        test_df[feature_cols] = self.scaler.transform(test_df[feature_cols].values)
+        train_mask_idx = df['Date_Std'] < train_cutoff
+        self.scaler.fit(df.loc[train_mask_idx, feature_cols].values)
 
-        # Tạo sequences
-        X_train, y_train = self._create_sequences(train_df, feature_cols, lookback)
-        X_test, y_test = self._create_sequences(test_df, feature_cols, lookback)
+        scaled_df = df.copy()
+        scaled_df[feature_cols] = self.scaler.transform(df[feature_cols].values)
+        # Bỏ Target ở phiên cuối của tập train để tránh leakage sang test
+        last_train_rows = scaled_df[train_mask_idx].groupby('Ticker_Std').tail(1).index
+        scaled_df.loc[last_train_rows, 'Target_Std'] = np.nan
+
+        # Tạo sequences với history liền mạch
+        test_mask_idx = scaled_df['Date_Std'] >= train_cutoff
+        X_train, y_train = self._create_sequences(scaled_df, feature_cols, lookback, mask=train_mask_idx)
+        X_test, y_test = self._create_sequences(scaled_df, feature_cols, lookback, mask=test_mask_idx)
 
         # Build và train model
         ModelClass = self._build_model_class()
@@ -404,25 +371,25 @@ class LSTMModelBuilder:
         with torch.no_grad():
             if len(X_test) > 0:
                 test_logits = self.model(torch.tensor(X_test)).numpy()
-                temp = hp['temperature']
+                temp = 1.0
                 test_probs = 1.0 / (1.0 + np.exp(-test_logits / temp))
                 test_preds = (test_probs >= 0.5).astype(int)
                 test_acc = float(accuracy_score(y_test, test_preds))
                 try:
-                    test_auc = float(roc_auc_score(y_test, test_probs))
+                    test_auc = float(roc_auc_score(y_test, test_probs)) if len(np.unique(y_test)) == 2 else None
                 except Exception:
-                    test_auc = 0.5
+                    test_auc = None
             else:
-                test_acc, test_auc = 0.5, 0.5
+                raise ValueError('No independent LSTM test observations')
 
         # Tạo model card
         date_nodash = datetime.now().strftime("%Y%m%d")
-        train_dates = train_df['Date_Std']
-        test_dates = test_df['Date_Std']
+        train_dates = scaled_df.loc[train_mask_idx, 'Date_Std']
+        test_dates = scaled_df.loc[test_mask_idx, 'Date_Std']
 
         self.model_card = ModelCard(
             model_name="Calibrated Stacked LSTM (PyTorch)",
-            model_version=f"v{date_nodash}",
+            model_version=new_model_version(),
             trained_date=datetime.now().strftime("%Y-%m-%d"),
             model_type="lstm",
             dataset_size=len(X_train),
@@ -437,7 +404,7 @@ class LSTMModelBuilder:
         )
 
         metrics = {'accuracy': test_acc, 'auc_roc': test_auc}
-        logging.info(f"✅ LSTM đã train xong | Acc: {test_acc*100:.2f}% | AUC: {test_auc:.4f}")
+        logging.info(f"✅ LSTM đã train xong | Acc: {test_acc*100:.2f}% | AUC: {test_auc}")
         return metrics
 
     def serialize_model(self) -> bytes:
@@ -473,20 +440,8 @@ class LSTMModelBuilder:
 # ==============================================================================
 
 class FinBERTModelBuilder:
-    """
-    Đóng gói pipeline FinBERT Sentiment Analysis:
-    Load pre-trained FinBERT → Chạy sentiment inference → Lưu pipeline config + thống kê
-    """
-
-    DEFAULT_CONFIG = {
-        'model_name': 'ProsusAI/finbert',
-        'max_length': 128,
-        'prob_formula': '(avg_score + 1.0) / 2.0',
-        'prob_clip_min': 0.05,
-        'prob_clip_max': 0.95,
-        'buy_threshold': 0.55,
-        'sell_threshold': 0.45
-    }
+    """Pretrained sentiment inference; price forecasts require a fitted head."""
+    DEFAULT_CONFIG = {'model_name': 'ProsusAI/finbert', 'max_length': 128}
 
     def __init__(self, config: Optional[Dict] = None):
         self.config = config or self.DEFAULT_CONFIG.copy()
@@ -494,111 +449,30 @@ class FinBERTModelBuilder:
         self.sentiment_stats = {}
 
     def run_inference(self, df_news: pd.DataFrame, today_str: str) -> Tuple[List[Dict], Dict]:
-        """
-        Chạy FinBERT inference trên tập tin tức.
-        Trả về: (predictions_list, sentiment_stats_dict)
-        """
         import torch
         from transformers import AutoTokenizer, AutoModelForSequenceClassification
-
         tokenizer = AutoTokenizer.from_pretrained(self.config['model_name'])
         model = AutoModelForSequenceClassification.from_pretrained(self.config['model_name'])
         model.eval()
-
+        labels = {str(label).lower(): int(index) for index, label in model.config.id2label.items()}
         results = []
-        sentiment_stats = {}
-
         for (ticker, sector), group in df_news.groupby(['ma_co_phieu', 'nhom_nganh']):
-            scores = []
-            pos_count, neg_count, neu_count = 0, 0, 0
-
-            for title in group['tieu_de'].tolist():
-                inputs = tokenizer(str(title), return_tensors="pt",
-                                   truncation=True, max_length=self.config['max_length'])
+            outputs = []
+            for title in group['tieu_de'].dropna():
+                if not str(title).strip():
+                    continue
+                inputs = tokenizer(str(title), return_tensors='pt', truncation=True, max_length=self.config['max_length'])
                 with torch.no_grad():
-                    logits = model(**inputs).logits
-                    probs = torch.nn.functional.softmax(logits, dim=-1)[0].numpy()
-
-                score = float(probs[0] - probs[1])
-                scores.append(score)
-
-                # Đếm sentiment phân bố
-                if probs[0] > probs[1] and probs[0] > probs[2]:
-                    pos_count += 1
-                elif probs[1] > probs[0] and probs[1] > probs[2]:
-                    neg_count += 1
-                else:
-                    neu_count += 1
-
-            if scores:
-                avg_score = float(np.mean(scores))
-                prob_up = float(np.clip(
-                    (avg_score + 1.0) / 2.0,
-                    self.config['prob_clip_min'],
-                    self.config['prob_clip_max']
-                ))
-            else:
-                avg_score = 0.0
-                prob_up = 0.50
-
-            # Phân loại khuyến nghị (Confidence Threshold Filtering)
-            if prob_up >= self.config['buy_threshold']:
-                rec = "MUA"
-                trend = "Tăng mạnh" if prob_up >= 0.60 else "Tăng tích lũy"
-                conf = "Rất cao" if prob_up >= 0.60 else "Cao"
-            elif prob_up <= self.config['sell_threshold']:
-                rec = "BÁN"
-                trend = "Giảm mạnh" if prob_up <= 0.40 else "Giảm phân phối"
-                conf = "Rất cao" if prob_up <= 0.40 else "Cao"
-            else:
-                rec = "ĐỨNG NGOÀI"
-                trend = "Đi ngang / Lưỡng lự (Sideway)"
-                conf = "Trung bình"
-
-            results.append({
-                'ngay_du_bao': today_str,
-                'ma_co_phieu': ticker,
-                'nhom_nganh': sector,
-                'khuyen_nghi': rec,
-                'xac_suat_tang_gia': f"{prob_up * 100:.2f}%",
-                'xu_huong_du_kien': trend,
-                'do_tin_cay': conf,
-                'prob_num': prob_up,
-                'avg_sentiment_score': avg_score
-            })
-
-            sentiment_stats[ticker] = {
-                'positive': pos_count,
-                'negative': neg_count,
-                'neutral': neu_count,
-                'total_news': len(scores),
-                'avg_score': round(avg_score, 4),
-                'prob_up': round(prob_up, 4)
-            }
-
-        self.sentiment_stats = sentiment_stats
-
-        # Tạo model card
-        date_nodash = datetime.now().strftime("%Y%m%d")
-        total_news = sum(s['total_news'] for s in sentiment_stats.values())
-        total_pos = sum(s['positive'] for s in sentiment_stats.values())
-        total_neg = sum(s['negative'] for s in sentiment_stats.values())
-
-        self.model_card = ModelCard(
-            model_name="FinBERT Sentiment Analysis (ProsusAI/finbert)",
-            model_version=f"v{date_nodash}",
-            trained_date=datetime.now().strftime("%Y-%m-%d"),
-            model_type="finbert",
-            dataset_size=total_news,
-            num_features=0,
-            num_tickers=len(sentiment_stats),
-            hyperparameters=self.config,
-            metrics={},  # Sẽ được cập nhật bởi model_evaluator.py
-            notes=f"Pre-trained model. {total_news} tin tức phân tích: {total_pos} positive, {total_neg} negative"
-        )
-
-        logging.info(f"✅ FinBERT đã phân tích {total_news} tin tức cho {len(sentiment_stats)} mã")
-        return results, sentiment_stats
+                    outputs.append(torch.softmax(model(**inputs).logits, dim=-1)[0].numpy())
+            if not outputs:
+                continue
+            average = np.mean(outputs, axis=0)
+            sentiment = {f'sentiment_{label}': float(average[labels[label]]) for label in ('positive', 'negative', 'neutral')}
+            results.append({'ngay_du_bao': today_str, 'ma_co_phieu': ticker, 'nhom_nganh': sector,
+                            'prob_num': None, 'xac_suat_tang_gia': None,
+                            'khuyen_nghi': 'CHƯA CÓ MÔ HÌNH DỰ BÁO GIÁ', **sentiment})
+            self.sentiment_stats[ticker] = {'total_news': len(outputs), **sentiment}
+        return results, self.sentiment_stats
 
 
 # ==============================================================================
@@ -624,68 +498,31 @@ def save_model_to_minio(s3_hook, bucket_name: str, model_type: str,
     """
     version = model_card.model_version
     prefix = f"models/{model_type}/{version}/"
-
-    # 1. Lưu model_card.json
-    s3_hook.load_string(
-        string_data=model_card.to_json(),
-        key=f"{prefix}model_card.json",
-        bucket_name=bucket_name,
-        replace=True
-    )
-    logging.info(f"📋 Đã lưu model_card.json → {prefix}model_card.json")
-
-    # 2. Lưu model artifact
+    if s3_hook.check_for_key(key=prefix + 'model_card.json', bucket_name=bucket_name):
+        raise FileExistsError(f'Model version already published: {model_type}/{version}')
+    if model_type in ('xgboost', 'lstm', 'xgboost_return_5d') and model_bytes is None:
+        raise ValueError('Publishing a model requires its trained weights')
+    if model_type == 'lstm' and scaler_bytes is None:
+        raise ValueError('Publishing LSTM requires its matching scaler')
     if model_bytes is not None:
-        if model_type == 'xgboost':
-            model_key = f"{prefix}model.json"
-        elif model_type == 'lstm':
-            model_key = f"{prefix}model.pt"
-        else:
-            model_key = f"{prefix}model.bin"
-
-        s3_hook.load_bytes(
-            bytes_data=model_bytes,
-            key=model_key,
-            bucket_name=bucket_name,
-            replace=True
-        )
-        logging.info(f"🧠 Đã lưu model artifact → {model_key} ({len(model_bytes):,} bytes)")
-
-    # 3. Lưu scaler (LSTM)
+        filename = {'xgboost': 'model.json', 'lstm': 'model.pt',
+                    'xgboost_return_5d': 'model.json'}.get(model_type, 'model.bin')
+        s3_hook.load_bytes(bytes_data=model_bytes, key=prefix + filename,
+                           bucket_name=bucket_name, replace=False)
     if scaler_bytes is not None:
-        scaler_key = f"{prefix}scaler.pkl"
-        s3_hook.load_bytes(
-            bytes_data=scaler_bytes,
-            key=scaler_key,
-            bucket_name=bucket_name,
-            replace=True
-        )
-        logging.info(f"📐 Đã lưu scaler → {scaler_key}")
-
-    # 4. Lưu feature columns
+        s3_hook.load_bytes(bytes_data=scaler_bytes, key=prefix + 'scaler.pkl',
+                           bucket_name=bucket_name, replace=False)
     if model_card.feature_columns:
-        s3_hook.load_string(
-            string_data=json.dumps(model_card.feature_columns, ensure_ascii=False),
-            key=f"{prefix}feature_columns.json",
-            bucket_name=bucket_name,
-            replace=True
-        )
-
-    # 5. Lưu extra artifacts (VD: pipeline_config, sentiment_stats cho FinBERT)
-    if extra_artifacts:
-        for filename, content in extra_artifacts.items():
-            s3_hook.load_string(
-                string_data=content,
-                key=f"{prefix}{filename}",
-                bucket_name=bucket_name,
-                replace=True
-            )
-            logging.info(f"📎 Đã lưu {filename} → {prefix}{filename}")
-
-    # 6. Cập nhật registry.csv
+        s3_hook.load_string(string_data=json.dumps(model_card.feature_columns),
+                            key=prefix + 'feature_columns.json', bucket_name=bucket_name, replace=False)
+    for filename, content in (extra_artifacts or {}).items():
+        s3_hook.load_string(string_data=content, key=prefix + filename,
+                            bucket_name=bucket_name, replace=False)
+    # The card is the completion marker: readers never see a partly uploaded version.
+    s3_hook.load_string(string_data=model_card.to_json(), key=prefix + 'model_card.json',
+                        bucket_name=bucket_name, replace=False)
     _update_registry(s3_hook, bucket_name, model_card)
-
-    logging.info(f"✅ Đã lưu phiên bản {model_type}/{version} lên MinIO thành công!")
+    logging.info('Published immutable model %s/%s', model_type, version)
 
 
 def load_model_from_minio(s3_hook, bucket_name: str, model_type: str,
@@ -705,21 +542,14 @@ def load_model_from_minio(s3_hook, bucket_name: str, model_type: str,
     prefix = f"models/{model_type}/"
 
     if version is None:
-        # Tìm phiên bản mới nhất
-        keys = s3_hook.list_keys(bucket_name=bucket_name, prefix=prefix)
-        if not keys:
-            logging.warning(f"⚠️ Không tìm thấy model {model_type} nào trên MinIO")
-            return None
-
-        versions = set()
-        for k in keys:
-            parts = k.replace(prefix, '').split('/')
-            if parts[0].startswith('v'):
-                versions.add(parts[0])
-
-        if not versions:
-            return None
-        version = sorted(versions)[-1]
+        keys = s3_hook.list_keys(bucket_name=bucket_name, prefix=prefix) or []
+        versions = {key[len(prefix):].split('/')[0] for key in keys
+                    if key.endswith('/model_card.json')}
+        for candidate in sorted(versions, reverse=True):
+            artifact = load_model_from_minio(s3_hook, bucket_name, model_type, candidate)
+            if artifact:
+                return artifact
+        return None
 
     ver_prefix = f"{prefix}{version}/"
 
@@ -730,13 +560,16 @@ def load_model_from_minio(s3_hook, bucket_name: str, model_type: str,
     try:
         card_json = s3_hook.read_key(card_key, bucket_name=bucket_name)
         result['model_card'] = ModelCard.from_json(card_json)
+        if (result['model_card'].model_version != version or
+                result['model_card'].model_type != model_type):
+            return None
         logging.info(f"📋 Đã load model_card: {card_key}")
     except Exception:
         logging.warning(f"⚠️ Không tìm thấy model_card: {card_key}")
         return None
 
     # Load model artifact
-    if model_type == 'xgboost':
+    if model_type in ('xgboost', 'xgboost_return_5d'):
         model_key = f"{ver_prefix}model.json"
     elif model_type == 'lstm':
         model_key = f"{ver_prefix}model.pt"
@@ -769,7 +602,24 @@ def load_model_from_minio(s3_hook, bucket_name: str, model_type: str,
     except Exception:
         result['feature_columns'] = []
 
+    if model_key and (not result.get('model_bytes') or not result['feature_columns']):
+        return None
+    if model_type == 'lstm' and not result.get('scaler_bytes'):
+        return None
     return result
+
+
+def load_evaluation_model(s3_hook, bucket, kind, pipeline_run_id=None):
+    if not pipeline_run_id:
+        return load_model_from_minio(s3_hook, bucket, kind)
+    prefix = f'models/{kind}/'
+    keys = s3_hook.list_keys(bucket_name=bucket, prefix=prefix) or []
+    versions = {key[len(prefix):].split('/')[0] for key in keys if key.endswith('/model_card.json')}
+    for version in sorted(versions, reverse=True):
+        artifacts = load_model_from_minio(s3_hook, bucket, kind, version)
+        if artifacts and artifacts['model_card'].hyperparameters.get('pipeline_run_id') == pipeline_run_id:
+            return artifacts
+    return None
 
 
 def list_model_versions(s3_hook, bucket_name: str, model_type: Optional[str] = None) -> pd.DataFrame:
@@ -779,32 +629,25 @@ def list_model_versions(s3_hook, bucket_name: str, model_type: Optional[str] = N
     Returns:
         DataFrame với cột: model_type, version, trained_date, accuracy, auc_roc, dataset_size
     """
-    registry_key = "models/registry.csv"
+    frames = []
     try:
-        raw = s3_hook.read_key(registry_key, bucket_name=bucket_name)
-        df = pd.read_csv(io.StringIO(raw))
-        if model_type:
-            df = df[df['model_type'] == model_type]
-        return df
+        frames.append(pd.read_csv(io.StringIO(s3_hook.read_key('models/registry.csv', bucket_name=bucket_name))))
     except Exception:
-        return pd.DataFrame(columns=['model_type', 'version', 'trained_date',
-                                     'accuracy', 'auc_roc', 'dataset_size'])
+        pass  # Compatibility with registries created before per-version entries.
+    keys = s3_hook.list_keys(bucket_name=bucket_name, prefix='models/registry/') or []
+    for key in sorted(keys):
+        if key.endswith('.json'):
+            frames.append(pd.DataFrame([json.loads(s3_hook.read_key(key, bucket_name=bucket_name))]))
+    if not frames:
+        return pd.DataFrame(columns=['model_type', 'version', 'trained_date', 'accuracy', 'auc_roc', 'dataset_size'])
+    df = pd.concat(frames, ignore_index=True).drop_duplicates(['model_type', 'version'], keep='last')
+    if model_type:
+        df = df[df['model_type'] == model_type]
+    return df.sort_values(['trained_date', 'version']).reset_index(drop=True)
 
 
 def _update_registry(s3_hook, bucket_name: str, model_card: ModelCard):
-    """Cập nhật file registry.csv tổng hợp trên MinIO."""
-    registry_key = "models/registry.csv"
-
-    # Đọc registry hiện tại (nếu có)
-    try:
-        raw = s3_hook.read_key(registry_key, bucket_name=bucket_name)
-        df = pd.read_csv(io.StringIO(raw))
-    except Exception:
-        df = pd.DataFrame(columns=['model_type', 'version', 'trained_date',
-                                   'accuracy', 'auc_roc', 'dataset_size',
-                                   'num_features', 'num_tickers', 'notes'])
-
-    # Thêm hoặc cập nhật dòng mới
+    """Write an independent entry so parallel model families cannot lose updates."""
     new_row = {
         'model_type': model_card.model_type,
         'version': model_card.model_version,
@@ -817,22 +660,12 @@ def _update_registry(s3_hook, bucket_name: str, model_card: ModelCard):
         'notes': model_card.notes
     }
 
-    # Xóa dòng cũ nếu cùng model_type + version
-    if not df.empty:
-        mask = ~((df['model_type'] == model_card.model_type) & (df['version'] == model_card.model_version))
-        df = df[mask]
-    df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
-
-    # Ghi lại
-    buf = io.StringIO()
-    df.to_csv(buf, index=False, encoding='utf-8-sig')
     s3_hook.load_string(
-        string_data=buf.getvalue(),
-        key=registry_key,
+        string_data=json.dumps(new_row),
+        key=f"models/registry/{model_card.model_type}/{model_card.model_version}.json",
         bucket_name=bucket_name,
-        replace=True
+        replace=False,
     )
-    logging.info(f"📝 Đã cập nhật registry.csv ({len(df)} phiên bản)")
 
 
 # ==============================================================================
@@ -846,7 +679,7 @@ def select_champion_model(s3_hook,
                           current_acc: float,
                           current_auc: float,
                           max_lookback_days: int = 7,
-                          min_auc: float = 0.53,
+                          min_auc: float = 0.495,
                           min_acc: float = 0.50) -> Dict[str, Any]:
     """
     Cơ chế Model Validation Gate (Champion-Challenger):
@@ -862,7 +695,7 @@ def select_champion_model(s3_hook,
         current_acc: Accuracy của model vừa train trên Test set
         current_auc: AUC-ROC của model vừa train trên Test set
         max_lookback_days: Giới hạn số ngày lùi về quá khứ (mặc định 7 ngày để tránh Concept Drift)
-        min_auc: Ngưỡng AUC tối thiểu chấp nhận được (mặc định 0.53)
+        min_auc: Ngưỡng AUC tối thiểu chấp nhận được (mặc định 0.495)
         min_acc: Ngưỡng Accuracy tối thiểu chấp nhận được (mặc định 0.50)
 
     Returns:
@@ -873,39 +706,36 @@ def select_champion_model(s3_hook,
             'reason': str
             'artifacts': Optional[Dict]
     """
-    # 1. Kiểm tra model mới hôm nay có đạt ngưỡng tối thiểu hay không
-    current_passed = (current_auc >= min_auc and current_acc >= min_acc)
+    # 1. Kiểm tra model mới hôm nay có đạt ngưỡng tối thiểu hay không (mặc định min_auc=0.495, min_acc=0.50)
+    current_passed = (current_auc is not None and current_acc is not None and
+                      np.isfinite(current_auc) and np.isfinite(current_acc) and
+                      current_auc >= min_auc and current_acc >= min_acc)
+    acc_text = f'{current_acc:.1%}' if current_acc is not None else 'unavailable'
 
     if current_passed:
         logging.info(f"✅ Model mới {current_version} ({model_type}) đạt chuẩn chất lượng "
-                     f"(AUC={current_auc:.3f} >= {min_auc}, Acc={current_acc:.1%} >= {min_acc:.0%}). "
+                     f"(AUC={current_auc} >= {min_auc}, Acc={acc_text} >= {min_acc:.0%}). "
                      f"Chọn làm Champion!")
         return {
             'status': 'USE_CURRENT',
             'selected_version': current_version,
             'selected_metrics': {'accuracy': current_acc, 'auc_roc': current_auc},
-            'reason': (f"Model mới ({current_version}: AUC={current_auc:.3f}, Acc={current_acc:.1%}) "
+            'reason': (f"Model mới ({current_version}: AUC={current_auc}, Acc={acc_text}) "
                        f"đạt chuẩn chất lượng (AUC>={min_auc}, Acc>={min_acc:.0%})."),
             'artifacts': None
         }
 
     # 2. Model hôm nay không đạt chuẩn -> Bắt đầu quét registry.csv tìm model cũ dự phòng
     logging.warning(f"⚠️ Model mới {current_version} ({model_type}) KHÔNG ĐẠT CHUẨN "
-                    f"(AUC={current_auc:.3f} < {min_auc} hoặc Acc={current_acc:.1%} < {min_acc:.0%}). "
+                    f"(AUC={current_auc} < {min_auc} hoặc Acc={acc_text} < {min_acc:.0%}). "
                     f"Bắt đầu quét registry.csv trong {max_lookback_days} ngày gần nhất...")
 
     try:
-        current_dt = datetime.strptime(current_version.replace('v', ''), "%Y%m%d")
+        current_dt = version_date(current_version)
     except Exception:
         current_dt = datetime.now()
 
-    registry_key = "models/registry.csv"
-    df_reg = pd.DataFrame()
-    try:
-        raw = s3_hook.read_key(registry_key, bucket_name=bucket_name)
-        df_reg = pd.read_csv(io.StringIO(raw))
-    except Exception as e:
-        logging.warning(f"⚠️ Không thể đọc registry.csv từ MinIO: {e}")
+    df_reg = list_model_versions(s3_hook, bucket_name, model_type)
 
     valid_candidates = []
     if not df_reg.empty:
@@ -924,7 +754,7 @@ def select_champion_model(s3_hook,
 
             if row_dt is None and ver.startswith('v'):
                 try:
-                    row_dt = datetime.strptime(ver.replace('v', ''), "%Y%m%d")
+                    row_dt = version_date(ver)
                 except Exception:
                     pass
 
@@ -933,12 +763,12 @@ def select_champion_model(s3_hook,
 
             # Kiểm tra khoảng thời gian (không quá max_lookback_days và không ở tương lai)
             days_diff = (current_dt - row_dt).days
-            if 0 < days_diff <= max_lookback_days:
+            if 0 <= days_diff <= max_lookback_days:
                 auc_val = pd.to_numeric(row.get('auc_roc'), errors='coerce')
                 acc_val = pd.to_numeric(row.get('accuracy'), errors='coerce')
 
                 # Kiểm tra ngưỡng chất lượng
-                if pd.notna(auc_val) and pd.notna(acc_val):
+                if pd.notna(auc_val) and pd.notna(acc_val) and np.isfinite(auc_val) and np.isfinite(acc_val):
                     if auc_val >= min_auc and acc_val >= min_acc:
                         valid_candidates.append({
                             'version': ver,
@@ -952,16 +782,12 @@ def select_champion_model(s3_hook,
     if valid_candidates:
         # Sắp xếp ưu tiên AUC cao nhất, sau đó đến Accuracy
         valid_candidates.sort(key=lambda x: (x['auc_roc'], x['accuracy']), reverse=True)
-        best_candidate = valid_candidates[0]
-        best_ver = best_candidate['version']
-
-        logging.info(f"🔄 Tìm thấy model fallback tốt nhất trong {max_lookback_days} ngày: "
-                     f"{best_ver} (AUC={best_candidate['auc_roc']:.3f}, Acc={best_candidate['accuracy']:.1%}, "
-                     f"cách đây {best_candidate['days_ago']} ngày).")
-
-        # Tải artifacts của model đó về
-        artifacts = load_model_from_minio(s3_hook, bucket_name, model_type, version=best_ver)
-        if artifacts and artifacts.get('model_bytes'):
+        for best_candidate in valid_candidates:
+            best_ver = best_candidate['version']
+            artifacts = load_model_from_minio(s3_hook, bucket_name, model_type, version=best_ver)
+            if not artifacts or not artifacts.get('model_bytes'):
+                logging.warning('Incomplete fallback %s; checking the next candidate.', best_ver)
+                continue
             return {
                 'status': 'FALLBACK',
                 'selected_version': best_ver,
@@ -969,13 +795,11 @@ def select_champion_model(s3_hook,
                     'accuracy': best_candidate['accuracy'],
                     'auc_roc': best_candidate['auc_roc']
                 },
-                'reason': (f"Model mới ({current_version}: AUC={current_auc:.3f}, Acc={current_acc:.1%}) không đạt chuẩn. "
+                'reason': (f"Model mới ({current_version}: AUC={current_auc}, Acc={acc_text}) không đạt chuẩn. "
                            f"Tự động fallback về phiên bản {best_ver} (AUC={best_candidate['auc_roc']:.3f}, "
                            f"Acc={best_candidate['accuracy']:.1%}, cách {best_candidate['days_ago']} ngày)."),
                 'artifacts': artifacts
             }
-        else:
-            logging.warning(f"⚠️ Model {best_ver} thiếu model_bytes trên MinIO, chuyển sang Safe Mode.")
 
     # 4. Kịch bản xấu nhất: Không có model nào trong max_lookback_days đạt chuẩn -> Safe Mode
     logging.warning(f"🚨 KÍCH HOẠT SAFE MODE: Model mới {current_version} và tất cả model trong {max_lookback_days} ngày qua "
@@ -984,9 +808,8 @@ def select_champion_model(s3_hook,
         'status': 'SAFE_MODE',
         'selected_version': current_version,
         'selected_metrics': {'accuracy': current_acc, 'auc_roc': current_auc},
-        'reason': (f"CẢNH BÁO THỊ TRƯỜNG BIẾN ĐỘNG MẠNH: Model mới ({current_version}: AUC={current_auc:.3f}, Acc={current_acc:.1%}) "
+        'reason': (f"CẢNH BÁO THỊ TRƯỜNG BIẾN ĐỘNG MẠNH: Model mới ({current_version}: AUC={current_auc}, Acc={acc_text}) "
                    f"và toàn bộ model trong {max_lookback_days} ngày gần nhất đều không đạt ngưỡng tin cậy. "
                    f"Kích hoạt SAFE MODE (Đứng ngoài quan sát, không giao dịch để bảo vệ vốn)."),
         'artifacts': None
     }
-

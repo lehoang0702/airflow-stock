@@ -2,10 +2,12 @@
 DAG: MASTER ORCHESTRATOR — ĐIỀU PHỐI TOÀN BỘ PIPELINE ĐA PHƯƠNG THỨC (1-CLICK RUN)
 ==================================================================================
 Kích hoạt và kiểm soát toàn bộ 8 quy trình từ Airflow Web UI:
-  Phase 1: Cào dữ liệu song song 3 nhánh (XGBoost, LSTM, FinBERT)
-  Phase 2: Huấn luyện & Dự báo song song 3 mô hình (XGBoost, LSTM, FinBERT)
+  Phase 1→2: Cào dữ liệu & Huấn luyện TUẦN TỰ từng nhánh (XGBoost → LSTM → FinBERT)
   Phase 3: Hợp nhất đa phương thức (Master Ensemble 4 phương pháp)
   Phase 4: Đánh giá khoa học toàn diện (Model Evaluation Pipeline)
+
+CHẾ ĐỘ TIẾT KIỆM TÀI NGUYÊN: Chạy tuần tự từng nhánh một để giảm thiểu
+peak CPU/RAM usage. Mỗi thời điểm chỉ có 1 model đang train/predict.
 """
 
 from datetime import datetime, timedelta
@@ -32,6 +34,7 @@ default_args = {
     'start_date': datetime(2024, 1, 1),
     'retries': 0,
     'on_failure_callback': telegram_failure_callback,
+    'execution_timeout': timedelta(hours=3),
 }
 
 
@@ -40,7 +43,7 @@ def notify_pipeline_start(**context):
     now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     msg = (
         "Hệ thống đã nhận lệnh kích hoạt <b>Master Pipeline</b>.\n"
-        "Bắt đầu thực thi đồng thời 3 nhánh cào dữ liệu (XGBoost, LSTM, FinBERT)."
+        "Bắt đầu thực thi TUẦN TỰ từng nhánh (XGBoost → LSTM → FinBERT) để tiết kiệm tài nguyên."
     )
     send_pipeline_event("BẮT ĐẦU CHẠY MASTER PIPELINE", msg, icon="🚀")
     logging.info("🚀 Đã gửi thông báo khởi chạy Master Pipeline về Telegram.")
@@ -52,6 +55,7 @@ with DAG(
     default_args=default_args,
     schedule_interval=DEFAULT_CRON_SCHEDULE,
     catchup=False,
+    max_active_runs=1,
     tags=['master', 'orchestrator', '1_click', 'pipeline', 'all_models', 'scheduled'],
 ) as dag:
 
@@ -61,41 +65,42 @@ with DAG(
 ### 1. Tổng Quan & Trải Nghiệm Web UI
 DAG này là **Trung tâm Điều phối Cấp cao (Orchestrator)** cho phép người dùng hoặc giảng viên chỉ cần bấm **▶ DUY NHẤT 1 NÚT** trên Airflow Web UI để chạy toàn bộ hệ thống từ đầu đến cuối một cách tự động, chuẩn xác và mượt mà.
 
-### 2. Sơ Đồ Kiến Trúc Luồng Thực Thi
+⚡ **CHẾ ĐỘ TIẾT KIỆM TÀI NGUYÊN:** Pipeline chạy TUẦN TỰ từng nhánh một
+(XGBoost → LSTM → FinBERT) để giảm thiểu peak CPU/RAM. Mỗi thời điểm chỉ có
+1 model đang crawl/train/predict.
+
+### 2. Sơ Đồ Kiến Trúc Luồng Thực Thi (Tuần Tự)
 ```mermaid
 graph TD
     START([▶ Bấm 1-Click trên Web UI]) --> N_START[🚀 Gửi thông báo bắt đầu qua Telegram]
     
-    subgraph Giai đoạn 1: Cào dữ liệu song song 3 nhánh
+    subgraph Nhánh 1: XGBoost
         N_START --> P1_XGB[Cào dữ liệu & 85+ Features XGBoost]
-        N_START --> P1_LSTM[Cào dữ liệu & Chuỗi nến LSTM]
-        N_START --> P1_FIN[Cào tin tức tài chính FinBERT]
+        P1_XGB --> P2_XGB[Huấn luyện GBDT & Dự báo XGBoost]
     end
     
-    subgraph Giai đoạn 2: Huấn luyện & Dự báo độc lập
-        P1_XGB --> P2_XGB[Huấn luyện GBDT & Dự báo XGBoost]
+    subgraph Nhánh 2: LSTM
+        P2_XGB --> P1_LSTM[Cào dữ liệu & Chuỗi nến LSTM]
         P1_LSTM --> P2_LSTM[Huấn luyện PyTorch LSTM & Dự báo]
+    end
+    
+    subgraph Nhánh 3: FinBERT
+        P2_LSTM --> P1_FIN[Cào tin tức tài chính FinBERT]
         P1_FIN --> P2_FIN[Chạy Transformer NLP Dự báo FinBERT]
     end
     
-    subgraph Giai đoạn 3: Hợp nhất & Đánh giá khoa học
-        P2_XGB --> P3_ENS[👑 Master Ensemble 4 Phương Pháp]
-        P2_LSTM --> P3_ENS
-        P2_FIN --> P3_ENS
+    subgraph Giai đoạn cuối: Hợp nhất & Đánh giá
+        P2_FIN --> P3_ENS[👑 Master Ensemble 4 Phương Pháp]
         P3_ENS --> P4_EVAL[📊 Đánh Giá Khoa Học Toàn Diện]
     end
 ```
 
-### 3. Các Giai Đoạn Chi Tiết
-1. **Phase 1 (Data Ingestion & Feature Engineering):**
-   - Kích hoạt song song 3 DAGs cào dữ liệu để chuẩn bị dữ liệu đầu vào.
-2. **Phase 2 (Model Training & Inference):**
-   - Mỗi nhánh khi cào xong sẽ lập tức kích hoạt bước huấn luyện/suy luận tương ứng (không cần đợi 2 nhánh còn lại).
-   - Tự động ghi nhận Model Artifact, Scaler và Model Card lên MinIO.
-3. **Phase 3 (Master Ensemble Integration):**
-   - Đợi cả 3 nhánh hoàn tất ➔ kích hoạt `dag_ensemble_master` để tổng hợp 4 phương pháp và tính Trading Plan.
-4. **Phase 4 (Model Evaluation):**
-   - Kích hoạt `dag_model_evaluation` để kiểm định TimeSeriesSplit CV, Sentiment correlation và xuất báo cáo CSV.
+### 3. Các Giai Đoạn Chi Tiết (Tuần Tự)
+1. **Nhánh XGBoost:** Cào dữ liệu → Huấn luyện & Dự báo XGBoost
+2. **Nhánh LSTM:** Cào dữ liệu → Huấn luyện & Dự báo LSTM
+3. **Nhánh FinBERT:** Cào tin tức → Phân tích sentiment FinBERT
+4. **Master Ensemble:** Tổng hợp 4 phương pháp và tính Trading Plan
+5. **Model Evaluation:** Kiểm định TimeSeriesSplit CV, Sentiment correlation và xuất báo cáo CSV
 
 ### 4. Cơ Chế Giám Sát & Báo Động
 - **Cảnh báo lỗi tức thời:** Bất kỳ task nào trong chuỗi gặp sự cố, hệ thống `on_failure_callback` sẽ gửi thông báo khẩn cấp kèm chi tiết lỗi và đường link xem log về Telegram.
@@ -118,6 +123,7 @@ graph TD
         wait_for_completion=True,
         poke_interval=10,
         reset_dag_run=False,
+        conf={'pipeline_run_id': '{{ run_id }}', 'as_of': '{{ ds_nodash }}'},
     )
 
     phase1_crawl_lstm = TriggerDagRunOperator(
@@ -126,6 +132,8 @@ graph TD
         wait_for_completion=True,
         poke_interval=10,
         reset_dag_run=False,
+        trigger_rule='all_done',
+        conf={'pipeline_run_id': '{{ run_id }}', 'as_of': '{{ ds_nodash }}'},
     )
 
     phase1_crawl_finbert = TriggerDagRunOperator(
@@ -134,6 +142,8 @@ graph TD
         wait_for_completion=True,
         poke_interval=10,
         reset_dag_run=False,
+        trigger_rule='all_done',
+        conf={'pipeline_run_id': '{{ run_id }}', 'as_of': '{{ ds_nodash }}'},
     )
 
     # --- PHASE 2: HUẤN LUYỆN & DỰ BÁO SONG SONG ---
@@ -143,6 +153,7 @@ graph TD
         wait_for_completion=True,
         poke_interval=15,
         reset_dag_run=False,
+        conf={'pipeline_run_id': '{{ run_id }}', 'as_of': '{{ ds_nodash }}'},
     )
 
     phase2_train_lstm = TriggerDagRunOperator(
@@ -151,6 +162,7 @@ graph TD
         wait_for_completion=True,
         poke_interval=15,
         reset_dag_run=False,
+        conf={'pipeline_run_id': '{{ run_id }}', 'as_of': '{{ ds_nodash }}'},
     )
 
     phase2_predict_finbert = TriggerDagRunOperator(
@@ -159,6 +171,7 @@ graph TD
         wait_for_completion=True,
         poke_interval=15,
         reset_dag_run=False,
+        conf={'pipeline_run_id': '{{ run_id }}', 'as_of': '{{ ds_nodash }}'},
     )
 
     # --- PHASE 3: MASTER ENSEMBLE ---
@@ -168,6 +181,8 @@ graph TD
         wait_for_completion=True,
         poke_interval=10,
         reset_dag_run=False,
+        trigger_rule='all_done',
+        conf={'pipeline_run_id': '{{ run_id }}', 'as_of': '{{ ds_nodash }}'},
     )
 
     # --- PHASE 4: ĐÁNH GIÁ MÔ HÌNH ---
@@ -177,15 +192,32 @@ graph TD
         wait_for_completion=True,
         poke_interval=10,
         reset_dag_run=False,
+        trigger_rule='all_done',
+        conf={'pipeline_run_id': '{{ run_id }}', 'as_of': '{{ ds_nodash }}'},
     )
 
-    # --- ĐỊNH NGHĨA LUỒNG THỰC THI CHUẨN XÁC ---
-    notify_start >> [phase1_crawl_xgboost, phase1_crawl_lstm, phase1_crawl_finbert]
+    def _check_pipeline_status(**context):
+        tis = context['dag_run'].get_task_instances()
+        failed_tasks = [ti.task_id for ti in tis if ti.state == 'failed']
+        if failed_tasks:
+            raise ValueError(f"Các nhánh sau đã thất bại: {', '.join(failed_tasks)}. Pipeline chạy degraded.")
 
-    # Đảm bảo Phase 1 (đặc biệt là LSTM chứa dữ liệu giá Close thực 20 mã) hoàn tất trước Phase 2
-    [phase1_crawl_xgboost, phase1_crawl_lstm] >> phase2_train_xgboost
-    phase1_crawl_lstm >> phase2_train_lstm
-    [phase1_crawl_finbert, phase1_crawl_lstm] >> phase2_predict_finbert
+    check_status = PythonOperator(
+        task_id='check_pipeline_status',
+        python_callable=_check_pipeline_status,
+        provide_context=True,
+        trigger_rule='all_done',
+    )
 
-    [phase2_train_xgboost, phase2_train_lstm, phase2_predict_finbert] >> phase3_ensemble >> phase4_evaluation
-
+    # --- ĐỊNH NGHĨA LUỒNG THỰC THI TUẦN TỰ (TIẾT KIỆM TÀI NGUYÊN) ---
+    # Chạy từng nhánh một: XGBoost → LSTM → FinBERT → Ensemble → Evaluation
+    # Mỗi thời điểm chỉ có 1 task nặng đang chạy, giảm peak CPU/RAM.
+    (
+        notify_start
+        >> phase1_crawl_xgboost >> phase2_train_xgboost    # Nhánh 1: XGBoost
+        >> phase1_crawl_lstm >> phase2_train_lstm            # Nhánh 2: LSTM
+        >> phase1_crawl_finbert >> phase2_predict_finbert    # Nhánh 3: FinBERT
+        >> phase3_ensemble                                   # Hợp nhất
+        >> phase4_evaluation                                 # Đánh giá
+        >> check_status
+    )

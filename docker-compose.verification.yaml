@@ -1,0 +1,55 @@
+# Verification profile: separate metadata DB, no scheduled runs or Telegram delivery.
+services:
+  postgres:
+    ports: !override []
+    mem_limit: 384m
+  minio:
+    ports: !override
+      - "9010:9000"
+      - "9011:9001"
+    mem_limit: 384m
+  airflow-init:
+    environment:
+      - AIRFLOW__CORE__LOAD_EXAMPLES=false
+  airflow-webserver:
+    mem_limit: 768m
+    environment:
+      - AIRFLOW__WEBSERVER__WORKERS=1
+      - AIRFLOW__SCHEDULER__USE_JOB_SCHEDULE=false
+      - TELEGRAM_DISABLED=true
+      - TELEGRAM_TOKEN=
+      - TELEGRAM_CHAT_ID=
+      - TELEGRAM_ALERT_TOKEN=
+      - TELEGRAM_ALERT_CHAT_ID=
+      - TELEGRAM_PREDICT_TOKEN=
+      - TELEGRAM_PREDICT_CHAT_ID=
+  airflow-scheduler:
+    mem_limit: 2560m
+    environment:
+      - AIRFLOW__SCHEDULER__USE_JOB_SCHEDULE=false
+      - AIRFLOW__CORE__PARALLELISM=2
+      - OMP_NUM_THREADS=2
+      - OPENBLAS_NUM_THREADS=2
+      - MKL_NUM_THREADS=2
+      - TELEGRAM_DISABLED=true
+      - TELEGRAM_TOKEN=
+      - TELEGRAM_CHAT_ID=
+      - TELEGRAM_ALERT_TOKEN=
+      - TELEGRAM_ALERT_CHAT_ID=
+      - TELEGRAM_PREDICT_TOKEN=
+      - TELEGRAM_PREDICT_CHAT_ID=
+  dashboard:
+    mem_limit: 1536m
+    environment:
+      - TELEGRAM_DISABLED=true
+      - TELEGRAM_TOKEN=
+      - TELEGRAM_CHAT_ID=
+      - TELEGRAM_ALERT_TOKEN=
+      - TELEGRAM_ALERT_CHAT_ID=
+      - TELEGRAM_PREDICT_TOKEN=
+      - TELEGRAM_PREDICT_CHAT_ID=
+  mlflow-server:
+    mem_limit: 1536m
+volumes:
+  postgres_data:
+    name: airflow-stock-verification-20261008

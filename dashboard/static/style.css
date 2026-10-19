@@ -2336,3 +2336,25 @@ mark, .search-match {
   .quality-kpi-grid, .model-leaderboard-grid { grid-template-columns: 1fr; }
   .quality-hero-banner { flex-direction: column; text-align: center; }
 }
+
+/* Processing has no invented percentage. Animation continues until a real response. */
+.data-loading { position: sticky; top: 0; z-index: 100; padding: 10px 24px; background: var(--bg-card, #161b22); color: var(--text-primary, #e5e7eb); }
+.data-loading.hidden { display: none; }
+.loading-track { height: 4px; overflow: hidden; background: #30363d; margin-bottom: 8px; border-radius: 4px; }
+.loading-indeterminate, .ai-loading-bar.is-pending { width: 35% !important; background: #8b5cf6; animation: processing-slide 1.3s ease-in-out infinite; }
+@keyframes processing-slide { from { transform: translateX(-100%); } to { transform: translateX(390%); } }
+.evaluation-table-wrap { overflow-x: auto; }
+#eval-benchmark-body td { white-space: nowrap; }
+.finbert-status-detail {
+  margin: 12px 0;
+  padding: 10px 12px;
+  border: 1px solid var(--border-color, #303641);
+  border-radius: 8px;
+  background: rgba(255, 193, 7, 0.04);
+  color: var(--text-secondary, #b7beca);
+  font-size: 12px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+.finbert-status-detail[hidden] { display: none; }
+.quote-stat-source { color: var(--text-muted, #8b95a5); font-size: 12px; line-height: 1.6; margin: 0 0 12px; }

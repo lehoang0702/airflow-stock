@@ -26,3 +26,11 @@ minio_data/
 .idea/
 .cache/
 .config/
+.kilo/
+
+# Local database backups can contain connection credentials and private history.
+.local-backups/
+
+output/
+tmp/
+

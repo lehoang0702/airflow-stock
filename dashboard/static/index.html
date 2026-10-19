@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="style.css?v=21.0">
+  <link rel="stylesheet" href="style.css?v=22.0">
 </head>
 <body class="yahoo-finance-theme">
   <!-- 1. TOP HEADER: BRANDING & SEARCH BAR -->
@@ -71,6 +71,10 @@
   </div>
 
   <!-- 4. MAIN CONTENT CONTAINER -->
+  <div id="data-loading" class="data-loading hidden" role="status" aria-live="polite">
+    <div class="loading-track"><div class="loading-indeterminate"></div></div>
+    <span>Hệ thống đang tải và xử lý dữ liệu…</span>
+  </div>
   <main class="app-content">
 
     <!-- ================================================================= -->
@@ -80,7 +84,7 @@
       <!-- Quote Hero Header (Exact Yahoo Finance Quote Style) -->
       <div class="quote-hero-header mb-3">
         <div class="quote-hero-top">
-          <span class="quote-market-exchange" id="chart-exchange-info">NasdaqGS - BOATS Real Time Price &bull; USD</span>
+          <span class="quote-market-exchange" id="chart-exchange-info">Dữ liệu nến ngày &bull; USD</span>
           <div class="quote-hero-title-row">
             <h1 class="quote-company-title">
               <span id="chart-company-name">Meta Platforms, Inc.</span>
@@ -92,22 +96,22 @@
         <!-- Real-time Price Banner & After-hours Indicator -->
         <div class="quote-price-banner">
           <div class="price-main-block">
-            <span class="quote-big-price" id="chart-current-price">$648.03</span>
-            <span class="quote-price-diff text-success" id="chart-change-tag">+3.65 (+0.57%)</span>
-            <span class="quote-market-time" id="chart-time-tag">At close: September 11 at 4:00:01 PM EDT</span>
+            <span class="quote-big-price" id="chart-current-price">--</span>
+            <span class="quote-price-diff text-success" id="chart-change-tag">--</span>
+            <span class="quote-market-time" id="chart-time-tag">Chưa có dữ liệu giá</span>
           </div>
-          <div class="price-overnight-block" id="chart-overnight-block">
-            <span class="overnight-price" id="chart-overnight-price">640.80</span>
-            <span class="overnight-diff text-danger" id="chart-overnight-change">-7.23 (-1.12%)</span>
-            <span class="overnight-time">Overnight: 1:38:55 AM EDT ⓘ</span>
+          <div class="price-overnight-block" id="chart-overnight-block" style="display:none">
+            <span class="overnight-price" id="chart-overnight-price">--</span>
+            <span class="overnight-diff text-danger" id="chart-overnight-change">--</span>
+            <span class="overnight-time"></span>
           </div>
         </div>
 
         <!-- Dividend Announcement Alert Banner -->
-        <div class="quote-dividend-banner" id="dividend-alert-banner">
+        <div class="quote-dividend-banner" id="dividend-alert-banner" style="display:none">
           <span class="div-icon">📋</span>
           <span class="div-label">Cổ Tức</span>
-          <span class="div-text" id="dividend-text">META đã công bố chi trả cổ tức bằng tiền mặt 0,525$ với ngày GDKHQ là 21/09/2026</span>
+          <span class="div-text" id="dividend-text"></span>
         </div>
       </div>
 
@@ -119,7 +123,7 @@
           <button class="view-btn" data-view="ensemble">👑 Ảnh Báo Cáo AI</button>
           <button class="view-btn" data-view="xgboost">🌲 XGBoost</button>
           <button class="view-btn" data-view="lstm">🧠 LSTM</button>
-          <button class="view-btn" data-view="finbert">📰 FinBERT</button>
+          <button class="view-btn" data-view="finbert">📰 Cảm xúc FinBERT</button>
         </div>
 
         <div class="view-actions hidden" id="view-actions-block">
@@ -183,40 +187,41 @@
             <div class="card-header-line">
               <h2 class="card-section-title">Chỉ Số Thống Kê Chính</h2>
             </div>
+            <p id="stat-source-note" class="quote-stat-source"></p>
             <div class="key-stats-grid">
               <!-- Left Statistics Column -->
               <div class="stats-col">
                 <div class="stat-item-row">
                   <span class="stat-name">Giá Đóng Cửa Trước</span>
-                  <span class="stat-value" id="stat-prev-close">644.38</span>
+                  <span class="stat-value" id="stat-prev-close">--</span>
                 </div>
                 <div class="stat-item-row">
                   <span class="stat-name">Giá Mở Cửa</span>
-                  <span class="stat-value" id="stat-open">653.02</span>
+                  <span class="stat-value" id="stat-open">--</span>
                 </div>
                 <div class="stat-item-row">
                   <span class="stat-name">Giá Mua (Bid)</span>
-                  <span class="stat-value" id="stat-bid">601.00 x 200</span>
+                  <span class="stat-value" id="stat-bid">--</span>
                 </div>
                 <div class="stat-item-row">
                   <span class="stat-name">Giá Bán (Ask)</span>
-                  <span class="stat-value" id="stat-ask">655.00 x 100</span>
+                  <span class="stat-value" id="stat-ask">--</span>
                 </div>
                 <div class="stat-item-row">
                   <span class="stat-name">Biên Độ Trong Ngày</span>
-                  <span class="stat-value" id="stat-day-range">646.20 - 664.24</span>
+                  <span class="stat-value" id="stat-day-range">--</span>
                 </div>
                 <div class="stat-item-row">
                   <span class="stat-name">Biên Độ 52 Tuần</span>
-                  <span class="stat-value" id="stat-52w-range">520.26 - 790.80</span>
+                  <span class="stat-value" id="stat-52w-range">--</span>
                 </div>
                 <div class="stat-item-row">
                   <span class="stat-name">Khối Lượng Giao Dịch</span>
-                  <span class="stat-value" id="stat-volume">16,924,953</span>
+                  <span class="stat-value" id="stat-volume">--</span>
                 </div>
                 <div class="stat-item-row">
-                  <span class="stat-name">KLGD Trung Bình</span>
-                  <span class="stat-value" id="stat-avg-volume">18,264,382</span>
+                  <span class="stat-name" id="stat-avg-volume-label">KLGD TB (tối đa 60 phiên)</span>
+                  <span class="stat-value" id="stat-avg-volume">--</span>
                 </div>
               </div>
 
@@ -224,35 +229,35 @@
               <div class="stats-col">
                 <div class="stat-item-row">
                   <span class="stat-name">Vốn Hóa Thị Trường</span>
-                  <span class="stat-value" id="stat-market-cap">1.651T</span>
+                  <span class="stat-value" id="stat-market-cap">--</span>
                 </div>
                 <div class="stat-item-row">
                   <span class="stat-name">Hệ Số Beta (5 Năm)</span>
-                  <span class="stat-value" id="stat-beta">1.24</span>
+                  <span class="stat-value" id="stat-beta">--</span>
                 </div>
                 <div class="stat-item-row">
                   <span class="stat-name">Tỷ Lệ P/E (TTM)</span>
-                  <span class="stat-value" id="stat-pe">24.39</span>
+                  <span class="stat-value" id="stat-pe">--</span>
                 </div>
                 <div class="stat-item-row">
                   <span class="stat-name">Thu Nhập/CP (EPS TTM)</span>
-                  <span class="stat-value" id="stat-eps">26.57</span>
+                  <span class="stat-value" id="stat-eps">--</span>
                 </div>
                 <div class="stat-item-row">
-                  <span class="stat-name">Ngày Báo Cáo KQKD (Dự Kiến)</span>
-                  <span class="stat-value" id="stat-earnings">28/10/2026</span>
+                  <span class="stat-name" id="stat-earnings-label">Ngày Báo Cáo KQKD (Dự Kiến)</span>
+                  <span class="stat-value" id="stat-earnings">--</span>
                 </div>
                 <div class="stat-item-row">
                   <span class="stat-name">Cổ Tức Kỳ Hạn &amp; Tỷ Suất</span>
-                  <span class="stat-value" id="stat-dividend">2.10 (0.33%)</span>
+                  <span class="stat-value" id="stat-dividend">--</span>
                 </div>
                 <div class="stat-item-row">
                   <span class="stat-name">Ngày GDKHQ (Không Hưởng Quyền)</span>
-                  <span class="stat-value" id="stat-ex-dividend">21/09/2026</span>
+                  <span class="stat-value" id="stat-ex-dividend">--</span>
                 </div>
                 <div class="stat-item-row">
                   <span class="stat-name">Giá Mục Tiêu 1 Năm</span>
-                  <span class="stat-value" id="stat-target-est">758.28</span>
+                  <span class="stat-value" id="stat-target-est">--</span>
                 </div>
               </div>
             </div>
@@ -268,43 +273,44 @@
               <div class="gauge-item highlight-gauge">
                 <div class="gauge-labels">
                   <span>👑 Master Ensemble</span>
-                  <span id="side-ensemble-val" class="gauge-pct bold">--%</span>
+                  <span id="side-ensemble-val" class="gauge-pct bold">Chưa có kết quả</span>
                 </div>
                 <div class="gauge-bar-bg">
-                  <div class="gauge-bar-fill purple" id="side-ensemble-bar" style="width: 50%;"></div>
+                  <div class="gauge-bar-fill purple" id="side-ensemble-bar" style="width: 0%;"></div>
                 </div>
               </div>
 
               <div class="gauge-item">
                 <div class="gauge-labels">
-                  <span>🌲 PP1: XGBoost (115+ Features)</span>
-                  <span id="side-xgb-val" class="gauge-pct">--%</span>
+                  <span>🌲 PP1: XGBoost (Kỹ thuật &amp; Vĩ mô)</span>
+                  <span id="side-xgb-val" class="gauge-pct">Chưa có kết quả</span>
                 </div>
                 <div class="gauge-bar-bg">
-                  <div class="gauge-bar-fill green" id="side-xgb-bar" style="width: 50%;"></div>
+                  <div class="gauge-bar-fill green" id="side-xgb-bar" style="width: 0%;"></div>
                 </div>
               </div>
 
               <div class="gauge-item">
                 <div class="gauge-labels">
                   <span>🧠 PP2: LSTM (Chuỗi Nến 15 Năm)</span>
-                  <span id="side-lstm-val" class="gauge-pct">--%</span>
+                  <span id="side-lstm-val" class="gauge-pct">Chưa có kết quả</span>
                 </div>
                 <div class="gauge-bar-bg">
-                  <div class="gauge-bar-fill blue" id="side-lstm-bar" style="width: 50%;"></div>
+                  <div class="gauge-bar-fill blue" id="side-lstm-bar" style="width: 0%;"></div>
                 </div>
               </div>
 
               <div class="gauge-item">
                 <div class="gauge-labels">
-                  <span>📰 PP3: FinBERT (NLP Sentiment)</span>
-                  <span id="side-bert-val" class="gauge-pct">--%</span>
+                  <span>📰 PP3: FinBERT (tín hiệu tin tức)</span>
+                  <span id="side-bert-val" class="gauge-pct">Chưa có kết quả</span>
                 </div>
-                <div class="gauge-bar-bg">
-                  <div class="gauge-bar-fill yellow" id="side-bert-bar" style="width: 50%;"></div>
+                <div class="gauge-bar-bg" aria-label="Điểm tín hiệu FinBERT">
+                  <div class="gauge-bar-fill green" id="side-bert-bar" style="width: 0%;"></div>
                 </div>
               </div>
             </div>
+            <div id="side-finbert-status" class="finbert-status-detail" hidden></div>
             <div class="model-status-note" id="side-model-status-note"></div>
           </div>
 
@@ -331,10 +337,10 @@
           <div class="spotlight-circle">🚀</div>
         </div>
         <div class="banner-info-side">
-          <div class="banner-tag">⭐ CƠ HỘI ĐẦU TƯ HÀNG ĐẦU HÔM NAY (TOP CONVICTION PICKS)</div>
-          <h2 class="banner-title">Các Mã Cổ Phiếu Đạt Tín Hiệu Mua Đồng Thuận 4 Mô Hình</h2>
+          <div class="banner-tag">⭐ TÍN HIỆU TỪ MÔ HÌNH ENSEMBLE</div>
+          <h2 class="banner-title">Các Mã Có Tín Hiệu Mua Từ Ensemble Đã Huấn Luyện</h2>
           <p class="banner-desc">
-            Hệ thống Master Ensemble tự động kết hợp 115+ chỉ báo toán học, chuỗi nến học sâu LSTM và phân tích cảm xúc tin tức tài chính FinBERT để đưa ra các điểm vào lệnh (Entry), mục tiêu lợi nhuận (Take Profit) và ngưỡng bảo toàn vốn (Stop Loss) chuẩn xác.
+            Master Ensemble kết hợp 35% XGBoost + 35% LSTM + 30% điểm FinBERT. Điểm FinBERT quy đổi từ cảm xúc tin tức; điểm tổng hợp dùng để tạo tín hiệu mua/bán theo công thức. Xác suất và mục tiêu giá chỉ xuất hiện khi có mô hình tương ứng; mức cắt lỗ và tỷ lệ R/R hiện chưa có kết quả.
           </p>
           <div class="top-picks-container" id="top-picks-container">
             <div class="empty-top-picks">Đang phân tích các cơ hội sáng giá nhất...</div>
@@ -389,7 +395,7 @@
                 <th class="th-lstm">LSTM (CHUỖI GIÁ)</th>
                 <th class="th-bert">FINBERT (TIN TỨC)</th>
                 <th class="th-signal">TỔNG HỢP ENSEMBLE</th>
-                <th class="th-confidence">ĐỒNG THUẬN</th>
+                <th class="th-confidence">XÁC SUẤT TĂNG T+1</th>
                 <th class="th-action">KẾ HOẠCH & CHART</th>
               </tr>
             </thead>
@@ -411,187 +417,53 @@
     <!-- TAB 3: AI AUDITING, EVALUATION & DATA QUALITY (MLOps)             -->
     <!-- ================================================================= -->
     <section id="tab-audit" class="tab-panel">
-      <!-- Section 1: Data Quality Gate -->
       <div class="section-header-box mb-3">
-        <div class="section-title-wrap">
-          <span class="section-icon-badge">🛡️</span>
-          <div>
-            <h2 class="section-title">KIỂM ĐỊNH CHẤT LƯỢNG DỮ LIỆU ĐẦU VÀO</h2>
-            <p class="section-subtitle">Chốt chặn tự động bảo đảm dữ liệu sạch, toàn vẹn và không rò rỉ trước khi nạp vào AI</p>
-          </div>
-        </div>
-        <div class="quality-status-badge" id="quality-overall-badge">
-          <span class="status-pulse-dot"></span>
-          <span id="quality-status-text">ĐẠT CHUẨN AN TOÀN</span>
-        </div>
+        <div><h2 class="section-title">KIỂM ĐỊNH DỮ LIỆU VÀ ĐÁNH GIÁ MÔ HÌNH</h2>
+          <p class="section-subtitle">Kết quả từ dữ liệu thực tế và mô hình đã huấn luyện.</p></div>
+        <div class="quality-status-badge" id="quality-overall-badge"><span id="quality-status-text">Chưa có kết quả</span></div>
       </div>
-
-      <!-- Health Banner -->
-      <div class="quality-hero-banner card mb-3">
-        <div class="hero-score-col">
-          <div class="health-score-ring">
-            <span class="score-number" id="qa-health-score">98.3%</span>
-            <span class="score-caption">ĐIỂM SỨC KHỎE</span>
-          </div>
-        </div>
-        <div class="hero-info-col">
-          <div class="hero-badge-tag">⭐ KẾT LUẬN KIỂM ĐỊNH: SẴN SÀNG CHO ĐẦU TƯ ĐỊNH LƯỢNG</div>
-          <h3 class="hero-headline">Dữ liệu thị trường 20 mã cổ phiếu đạt độ tin cậy tuyệt đối</h3>
-          <p class="hero-desc">
-            Toàn bộ chuỗi <strong>50,180 phiên nến giao dịch</strong> và <strong>117 chỉ báo kỹ thuật & vĩ mô</strong> đã vượt qua 5 vòng kiểm duyệt tính toàn vẹn khắt khe.
-          </p>
-          <div class="hero-tags-row">
-            <span class="hero-tag-item">✓ Không có giá âm / nến rỗng</span>
-            <span class="hero-tag-item">✓ Liên tục không đứt đoạn</span>
-            <span class="hero-tag-item">✓ Đầy đủ 20/20 mã cổ phiếu</span>
-            <span class="hero-tag-item">✓ Đã đồng bộ vĩ mô ^VIX & SPY</span>
-          </div>
-        </div>
-      </div>
-
-      <!-- 4 Quick Intuitive Metric Cards -->
+      <p id="quality-report-message" role="status">Chưa có báo cáo kiểm định.</p>
       <div class="quality-kpi-grid mb-3">
-        <div class="card quality-kpi-card">
-          <div class="kpi-icon-header">
-            <span class="kpi-symbol">🎯</span>
-            <span class="kpi-badge green">100% ĐẦY ĐỦ</span>
-          </div>
-          <span class="kpi-card-label">ĐỘ PHỦ CỔ PHIẾU</span>
-          <span class="kpi-card-value text-success" id="qa-ticker-coverage">20 / 20 Mã</span>
-          <div class="kpi-progress-bar"><div class="kpi-progress-fill green" style="width: 100%;"></div></div>
-          <span class="kpi-card-sub">Trọn vẹn 9 nhóm ngành trụ cột kinh tế Mỹ</span>
-        </div>
-
-        <div class="card quality-kpi-card">
-          <div class="kpi-icon-header">
-            <span class="kpi-symbol">📅</span>
-            <span class="kpi-badge blue">5 NĂM LỊCH SỬ</span>
-          </div>
-          <span class="kpi-card-label">ĐỘ SÂU CHUỖI NẾN</span>
-          <span class="kpi-card-value text-blue" id="qa-total-rows">50,180 Phiên</span>
-          <div class="kpi-progress-bar"><div class="kpi-progress-fill blue" style="width: 100%;"></div></div>
-          <span class="kpi-card-sub">25,100 bản ghi XGBoost + 25,080 chuỗi LSTM</span>
-        </div>
-
-        <div class="card quality-kpi-card">
-          <div class="kpi-icon-header">
-            <span class="kpi-symbol">🧼</span>
-            <span class="kpi-badge teal">AN TOÀN CAO</span>
-          </div>
-          <span class="kpi-card-label">TỶ LỆ DỮ LIỆU SẠCH</span>
-          <span class="kpi-card-value text-success" id="qa-clean-pct">98.34%</span>
-          <div class="kpi-progress-bar"><div class="kpi-progress-fill green" style="width: 98.34%;"></div></div>
-          <span class="kpi-card-sub">Khuyết thiếu chỉ 1.66% (&lt; 5% ngưỡng an toàn)</span>
-        </div>
-
-        <div class="card quality-kpi-card">
-          <div class="kpi-icon-header">
-            <span class="kpi-symbol">⚡</span>
-            <span class="kpi-badge purple">117 CHỈ BÁO</span>
-          </div>
-          <span class="kpi-card-label">BIẾN SỐ ĐẶC TRƯNG AI</span>
-          <span class="kpi-card-value text-purple" id="qa-total-cols">117 Biến Số</span>
-          <div class="kpi-progress-bar"><div class="kpi-progress-fill purple" style="width: 100%;"></div></div>
-          <span class="kpi-card-sub">RSI, MACD, Bollinger + Lãi suất 10Y & VIX</span>
-        </div>
+        <div class="card quality-kpi-card"><span class="kpi-card-label">ĐỘ PHỦ CỔ PHIẾU</span><span class="kpi-card-value" id="qa-ticker-coverage">—</span></div>
+        <div class="card quality-kpi-card"><span class="kpi-card-label">SỐ BẢN GHI ĐÃ KIỂM TRA</span><span class="kpi-card-value" id="qa-total-rows">—</span></div>
+        <div class="card quality-kpi-card"><span class="kpi-card-label">TỶ LỆ Ô CÓ DỮ LIỆU</span><span class="kpi-card-value" id="qa-clean-pct">—</span></div>
+        <div class="card quality-kpi-card"><span class="kpi-card-label">SỐ CỘT ĐÃ KIỂM TRA</span><span class="kpi-card-value" id="qa-total-cols">—</span></div>
       </div>
-
-      <!-- Section 2: Model Evaluation Benchmark Leaderboard -->
-      <div class="section-header-box mb-3 mt-4">
-        <div class="section-title-wrap">
-          <span class="section-icon-badge">🔬</span>
-          <div>
-            <h2 class="section-title">ĐÁNH GIÁ NĂNG LỰC 4 MÔ HÌNH HỌC MÁY</h2>
-            <p class="section-subtitle">Xếp hạng thực nghiệm khoa học, so sánh tỷ lệ dự báo chính xác và năng lực phòng vệ vốn</p>
-          </div>
-        </div>
-        <div class="eval-date-badge">
-          <span>Phiên Bản Đánh Giá: </span><strong id="eval-date-str">2026-09-11</strong>
-        </div>
+      <div class="section-header-box mb-3 mt-4"><div>
+        <h2 class="section-title">KẾT QUẢ KIỂM CHỨNG MÔ HÌNH</h2>
+        <p class="section-subtitle" id="evaluation-message" role="status">Chưa có kết quả đánh giá.</p>
+        <p>Lần đánh giá: <span id="eval-date-str">—</span></p>
+      </div></div>
+      <div class="model-leaderboard-grid mb-3">
+        <div class="card leaderboard-card"><div class="model-name">Ensemble Master</div>
+          <div class="model-winrate-box"><span class="winrate-label">TỶ LỆ DỰ BÁO ĐÚNG</span>
+            <span class="winrate-val" id="leaderboard-ensemble-winrate">Chưa có kết quả</span>
+            <div class="winrate-meter"><div class="winrate-fill blue" id="leaderboard-ensemble-bar" style="width:0%"></div></div>
+            <span class="winrate-sub" id="leaderboard-ensemble-details">Ngày đánh giá: — · Số mẫu: —</span>
+          </div></div>
+        <div class="card leaderboard-card"><div class="model-name">XGBoost</div>
+          <div class="model-winrate-box"><span class="winrate-label">TỶ LỆ DỰ BÁO ĐÚNG</span>
+            <span class="winrate-val" id="leaderboard-xgboost-winrate">Chưa có kết quả</span>
+            <div class="winrate-meter"><div class="winrate-fill blue" id="leaderboard-xgboost-bar" style="width:0%"></div></div>
+            <span class="winrate-sub" id="leaderboard-xgboost-details">Ngày đánh giá: — · Số mẫu: —</span>
+          </div></div>
+        <div class="card leaderboard-card"><div class="model-name">LSTM</div>
+          <div class="model-winrate-box"><span class="winrate-label">TỶ LỆ DỰ BÁO ĐÚNG</span>
+            <span class="winrate-val" id="leaderboard-lstm-winrate">Chưa có kết quả</span>
+            <div class="winrate-meter"><div class="winrate-fill blue" id="leaderboard-lstm-bar" style="width:0%"></div></div>
+            <span class="winrate-sub" id="leaderboard-lstm-details">Ngày đánh giá: — · Số mẫu: —</span>
+          </div></div>
+        <div class="card leaderboard-card"><div class="model-name">FinBERT — Cảm xúc tin tức</div>
+          <div class="model-winrate-box"><span class="winrate-label">PHÂN LOẠI TIN TỨC</span>
+            <span class="winrate-sub">Tích cực · Tiêu cực · Trung tính</span>
+            <span class="winrate-sub">Điểm tín hiệu = (1 + tích cực − tiêu cực) / 2, giới hạn 5–95%. Master dùng trọng số FinBERT 30%.</span>
+          </div></div>
       </div>
-
-      <!-- Top Model Leaderboard Cards (4 Cards) -->
-      <div class="model-leaderboard-grid mb-4">
-        <div class="card leaderboard-card rank-1">
-          <div class="rank-badge gold">👑 HẠNG 1 &bull; KHUYẾN NGHỊ CAO NHẤT</div>
-          <div class="model-card-head">
-            <h3 class="model-name">Mô Hình Tổng Hợp (Ensemble Master)</h3>
-            <span class="model-type-tag">Bỏ Phiếu Đa Phương Thức (Soft Voting)</span>
-          </div>
-          <div class="model-winrate-box">
-            <span class="winrate-label">TỶ LỆ DỰ BÁO CHÍNH XÁC</span>
-            <span class="winrate-val text-success" id="leaderboard-ensemble-winrate">56.8%</span>
-            <div class="winrate-meter">
-              <div class="winrate-fill purple" id="leaderboard-ensemble-bar" style="width: 56.8%;"></div>
-              <div class="winrate-baseline" title="Mốc ngẫu nhiên 50%"></div>
-            </div>
-            <span class="winrate-sub">ROC-AUC: <strong>0.598</strong> &bull; Sharpe Ratio: <strong>1.42</strong></span>
-          </div>
-          <p class="model-summary-desc">
-            Kết hợp thông minh giữa tín hiệu kỹ thuật GBDT, xung lực chuỗi thời gian Deep Learning LSTM và sắc thái tâm lý thị trường FinBERT.
-          </p>
-        </div>
-
-        <div class="card leaderboard-card">
-          <div class="rank-badge silver">🥈 HẠNG 2 &bull; MẠNG HỌC SÂU LSTM</div>
-          <div class="model-card-head">
-            <h3 class="model-name">PyTorch Deep LSTM</h3>
-            <span class="model-type-tag">Recurrent Neural Network (60-day Sequence)</span>
-          </div>
-          <div class="model-winrate-box">
-            <span class="winrate-label">TỶ LỆ DỰ BÁO CHÍNH XÁC</span>
-            <span class="winrate-val" id="leaderboard-lstm-winrate">53.4%</span>
-            <div class="winrate-meter">
-              <div class="winrate-fill blue" id="leaderboard-lstm-bar" style="width: 53.4%;"></div>
-              <div class="winrate-baseline"></div>
-            </div>
-            <span class="winrate-sub">ROC-AUC: <strong>0.562</strong> &bull; Sequence Depth: <strong>60 bars</strong></span>
-          </div>
-          <p class="model-summary-desc">
-            Khả năng ghi nhớ dài hạn và phát hiện chu kỳ giá lặp lại trong quá khứ vượt trội.
-          </p>
-        </div>
-
-        <div class="card leaderboard-card">
-          <div class="rank-badge bronze">🥉 HẠNG 3 &bull; ALGORITHM GBDT</div>
-          <div class="model-card-head">
-            <h3 class="model-name">XGBoost Classifier</h3>
-            <span class="model-type-tag">Gradient Boosted Decision Trees</span>
-          </div>
-          <div class="model-winrate-box">
-            <span class="winrate-label">TỶ LỆ DỰ BÁO CHÍNH XÁC</span>
-            <span class="winrate-val" id="leaderboard-xgb-winrate">52.1%</span>
-            <div class="winrate-meter">
-              <div class="winrate-fill green" id="leaderboard-xgb-bar" style="width: 52.1%;"></div>
-              <div class="winrate-baseline"></div>
-            </div>
-            <span class="winrate-sub">ROC-AUC: <strong>0.551</strong> &bull; 115+ Math Features</span>
-          </div>
-          <p class="model-summary-desc">
-            Phân tích đa nhân tố kỹ thuật (MACD, RSI, Bollinger Bands, Stochastics, VWAP).
-          </p>
-        </div>
-
-        <div class="card leaderboard-card">
-          <div class="rank-badge steel">📰 HẠNG 4 &bull; NLP TRANSFORMER</div>
-          <div class="model-card-head">
-            <h3 class="model-name">FinBERT Sentiment</h3>
-            <span class="model-type-tag">ProsusAI / Financial Language Model</span>
-          </div>
-          <div class="model-winrate-box">
-            <span class="winrate-label">TỶ LỆ DỰ BÁO CHÍNH XÁC</span>
-            <span class="winrate-val" id="leaderboard-bert-winrate">51.2%</span>
-            <div class="winrate-meter">
-              <div class="winrate-fill yellow" id="leaderboard-bert-bar" style="width: 51.2%;"></div>
-              <div class="winrate-baseline"></div>
-            </div>
-            <span class="winrate-sub">Phân tích tin tức thời gian thực từ 20 mã Blue-chip</span>
-          </div>
-          <p class="model-summary-desc">
-            Cung cấp góc nhìn tâm lý đám đông bổ trợ cho các phân tích kỹ thuật số liệu.
-          </p>
-        </div>
-      </div>
+      <div class="card evaluation-table-wrap"><table class="screener-table">
+        <thead><tr><th>Mô hình</th><th>Accuracy</th><th>ROC-AUC</th><th>Precision ↑ / ↓</th><th>Recall ↑ / ↓</th><th>F1 ↑ / ↓</th><th>Số mẫu</th><th>Ngày đánh giá</th><th>Kỳ hạn</th></tr></thead>
+        <tbody id="eval-benchmark-body"><tr><td colspan="9">Chưa có kết quả đánh giá.</td></tr></tbody>
+      </table></div>
+      <div id="cv-folds-list"></div>
     </section>
   </main>
 
@@ -605,8 +477,8 @@
           <span class="ai-loading-status" id="ai-progress-status-text">Đang cào dữ liệu & chạy mô hình AI...</span>
         </div>
         <div class="ai-loading-actions">
-          <span class="ai-loading-pct" id="ai-progress-pct-val">0%</span>
-          <button class="ai-loading-close" id="ai-modal-close-btn" title="Hủy">&times;</button>
+          <span class="ai-loading-pct" id="ai-progress-pct-val">Đang xử lý</span>
+          <button class="ai-loading-close" id="ai-modal-close-btn" title="Ẩn cửa sổ, tiếp tục xử lý">&times;</button>
         </div>
       </div>
       <div class="ai-loading-track">
@@ -622,8 +494,6 @@
     <img src="" alt="Enlarged Report Chart" class="lightbox-img" id="lightbox-img">
   </div>
 
-  <script src="app.js?v=21.0"></script>
+  <script src="app.js?v=22.2"></script>
 </body>
 </html>
-
-

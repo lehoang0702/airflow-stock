@@ -8,7 +8,6 @@ import io
 import time
 import logging
 import pandas as pd
-import numpy as np
 
 from airflow import DAG
 from airflow.operators.python import PythonOperator
@@ -36,60 +35,10 @@ default_args = {
     'retries': 1,
     'retry_delay': timedelta(minutes=3),
     'on_failure_callback': telegram_failure_callback,
+    'execution_timeout': timedelta(minutes=25),
 }
 
-def calculate_technical_features(df):
-    """Tính toán 25+ chỉ số kỹ thuật động lượng cho LSTM"""
-    df = df.copy()
-    close = df['Close']
-    open_p = df['Open']
-    high = df['High']
-    low = df['Low']
-    vol = df['Volume']
-
-    # Returns
-    df['log_ret'] = np.log(close / close.shift(1))
-    df['ret_5'] = close.pct_change(5)
-    df['ret_10'] = close.pct_change(10)
-    df['ret_20'] = close.pct_change(20)
-
-    # MA ratios
-    df['sma_10_ratio'] = close / close.rolling(10).mean()
-    df['sma_20_ratio'] = close / close.rolling(20).mean()
-    df['sma_50_ratio'] = close / close.rolling(50).mean()
-
-    # RSI
-    delta = close.diff()
-    gain = (delta.where(delta > 0, 0)).rolling(14).mean()
-    loss = (-delta.where(delta < 0, 0)).rolling(14).mean()
-    rs = gain / (loss + 1e-9)
-    df['rsi_14'] = 100 - (100 / (1 + rs))
-
-    # MACD
-    ema12 = close.ewm(span=12, adjust=False).mean()
-    ema26 = close.ewm(span=26, adjust=False).mean()
-    df['macd'] = ema12 - ema26
-    df['macd_signal'] = df['macd'].ewm(span=9, adjust=False).mean()
-    df['macd_hist'] = df['macd'] - df['macd_signal']
-
-    # Bollinger Bands
-    ma20 = close.rolling(20).mean()
-    std20 = close.rolling(20).std()
-    df['bb_pct_b'] = (close - (ma20 - 2 * std20)) / (4 * std20 + 1e-9)
-    df['bb_width'] = (4 * std20) / (ma20 + 1e-9)
-
-    # Volatility & Volume
-    df['volatility_10'] = df['log_ret'].rolling(10).std()
-    df['volatility_20'] = df['log_ret'].rolling(20).std()
-    df['vol_sma_ratio'] = vol / (vol.rolling(20).mean() + 1e-9)
-    
-    # Biến động nến
-    df['hl_spread'] = (high - low) / close
-    df['co_spread'] = (close - open_p) / close
-
-    # Target: 1 nếu ngày mai tăng, 0 nếu giảm
-    df['Target'] = (close.shift(-1) > close).astype(float)
-    return df
+from feature_engineering import calculate_technical_features
 
 def crawl_and_extract_lstm_features(**context):
     import yfinance as yf
@@ -109,6 +58,8 @@ def crawl_and_extract_lstm_features(**context):
             try:
                 raw = yf.download(ticker, period=period, auto_adjust=True, progress=False)
                 if not raw.empty and len(raw) >= 50:
+                    if isinstance(raw.columns, pd.MultiIndex):
+                        raw.columns = raw.columns.get_level_values(0)
                     return raw
             except Exception:
                 pass
@@ -126,7 +77,7 @@ def crawl_and_extract_lstm_features(**context):
                 hist['Date'] = pd.to_datetime(hist['Date']).dt.tz_localize(None).dt.normalize()
                 clean_name = m_ticker.replace('^', '').replace('=', '').replace('-', '').replace('.', '').lower()
                 hist[f'{clean_name}_close'] = hist['Close']
-                hist[f'{clean_name}_ret'] = hist['Close'].pct_change()
+                hist[f'{clean_name}_ret'] = hist['Close'].pct_change(fill_method=None)
                 macro_dfs[m_ticker] = hist[['Date', f'{clean_name}_close', f'{clean_name}_ret']].dropna()
                 logging.info(f"✅ Vĩ mô {m_ticker}: Đã lấy {len(hist)} phiên.")
             else:
@@ -139,7 +90,7 @@ def crawl_and_extract_lstm_features(**context):
         base_macro = list(macro_dfs.values())[0]
         for other_m in list(macro_dfs.values())[1:]:
             base_macro = pd.merge(base_macro, other_m, on='Date', how='outer')
-        df_macro = base_macro.sort_values('Date').ffill().bfill()
+        df_macro = base_macro.sort_values('Date').ffill()
     else:
         df_macro = pd.DataFrame({'Date': []})
 
@@ -171,39 +122,38 @@ def crawl_and_extract_lstm_features(**context):
             else:
                 hist_merged = hist_feats
 
-            hist_merged = hist_merged.ffill().bfill().dropna(subset=['Target'])
+            feature_columns = hist_merged.columns.difference(['Target', 'Date', 'Open', 'High', 'Low', 'Close', 'Volume'])
+            hist_merged[feature_columns] = hist_merged[feature_columns].ffill().fillna(0)
             all_stock_rows.append(hist_merged)
             logging.info(f"✅ Cổ phiếu {ticker}: Đã tính toán xong {len(hist_merged)} dòng.")
         except Exception as e:
             logging.error(f"❌ Lỗi xử lý mã {ticker}: {str(e)}")
             failed_tickers.append(ticker)
 
-    # NẾU CÓ MÃ BỊ LỖI MẠNG: Tự động Backfill từ dataset gần nhất trên MinIO để không bao giờ bị mất mã
+    from pipeline_storage import load_backup_rows, require_complete_panel
     if failed_tickers:
-        logging.warning(f"⚠️ Có {len(failed_tickers)} mã cào không thành công: {failed_tickers}. Đang kích hoạt cơ chế Backfill từ MinIO...")
-        try:
-            keys = s3_hook.list_keys(bucket_name=BUCKET_NAME, prefix="lstm/lstm_stock_20tickers_10y_")
-            valid_prev_keys = [k for k in sorted(keys) if not k.endswith(f"{date_nodash}.csv")]
-            if valid_prev_keys:
-                latest_prev_key = valid_prev_keys[-1]
-                logging.info(f"🔄 Đang đọc dữ liệu dự phòng từ: {latest_prev_key}")
-                raw_prev_csv = s3_hook.read_key(latest_prev_key, bucket_name=BUCKET_NAME)
-                df_prev = pd.read_csv(io.StringIO(raw_prev_csv))
-                for ft in list(failed_tickers):
-                    sub_prev = df_prev[df_prev['Ticker'] == ft].copy()
-                    if not sub_prev.empty and len(sub_prev) >= 50:
-                        all_stock_rows.append(sub_prev)
-                        logging.info(f"🛡️ Đã bù đắp thành công mã {ft} từ {latest_prev_key} ({len(sub_prev)} dòng).")
-                        failed_tickers.remove(ft)
-        except Exception as bf_err:
-            logging.warning(f"⚠️ Không thể backfill từ MinIO: {bf_err}")
+        backups = load_backup_rows(
+            s3_hook, BUCKET_NAME, 'lstm/lstm_stock_20tickers_10y_', 'Ticker',
+            failed_tickers, ['Date', 'Open', 'High', 'Low', 'Close', 'Volume'], date_nodash)
+        all_stock_rows.extend(backups.values())
 
     if not all_stock_rows:
         raise ValueError("❌ Không thu thập được dữ liệu của bất kỳ mã cổ phiếu nào!")
 
     df_final = pd.concat(all_stock_rows, ignore_index=True)
+    # CSV recovery supplies text dates while live observations use Timestamp.
+    # Normalize the entire panel before sorting or creating horizon targets.
+    df_final['Date'] = pd.to_datetime(df_final['Date'], errors='coerce', utc=True).dt.tz_localize(None).dt.normalize()
     df_final = df_final.sort_values(['Ticker', 'Date']).reset_index(drop=True)
-    df_final = df_final.ffill().bfill().fillna(0)
+    require_complete_panel(df_final, 'Ticker', 'Date', TICKERS_20)
+    from data_validator import validate_lstm_dataset, save_and_alert_quality_report
+    qa_result = validate_lstm_dataset(df_final, min_lookback=30, expected_tickers=TICKERS_20)
+    save_and_alert_quality_report(qa_result, s3_hook, BUCKET_NAME, date_nodash)
+    if not qa_result.is_valid:
+        raise ValueError(f'LSTM data quality failed: {qa_result.errors}')
+    from pipeline_data import direction_target
+    future = df_final.groupby('Ticker')['Close'].shift(-1)
+    df_final['Target'] = direction_target(df_final['Close'], future)
 
     # Chốt chặn an toàn (Quality Gate Guardrail): Bắt buộc đủ 20 mã mới được ghi đè MinIO
     unique_tickers = df_final['Ticker'].nunique()
@@ -240,13 +190,6 @@ def crawl_and_extract_lstm_features(**context):
 
     logging.info(f"🎉 ĐÃ LƯU THÀNH CÔNG DATASET LSTM LÊN MINIO: {minio_key} ({len(df_final)} dòng, {unique_tickers} mã)")
 
-    # === KIỂM ĐỊNH CHẤT LƯỢNG DỮ LIỆU (DATA QUALITY MLOPS) ===
-    try:
-        from data_validator import validate_lstm_dataset, save_and_alert_quality_report
-        qa_result = validate_lstm_dataset(df_final, min_lookback=30, expected_tickers=TICKERS_20)
-        save_and_alert_quality_report(qa_result, s3_hook, BUCKET_NAME, date_nodash)
-    except Exception as qa_err:
-        logging.warning(f"⚠️ Không thể chạy QA validation LSTM: {qa_err}")
 
 
 with DAG(

@@ -103,3 +103,13 @@ DATASET_HISTORY_PERIOD = '15y'  # Lịch sử 15 năm (2011 đến nay)
 # 7. Lịch chạy tự động tối ưu cho thị trường chứng khoán Mỹ
 # 22:00 UTC (05:00 sáng VN) từ Thứ Hai đến Thứ Sáu (sau khi phiên NYSE/NASDAQ đóng cửa)
 DEFAULT_CRON_SCHEDULE = '0 22 * * 1-5'
+
+# 8. Ngưỡng tín hiệu giao dịch thống nhất toàn hệ thống (Trading Decision Thresholds)
+# Xác suất tăng giá >= BUY_THRESHOLD -> MUA
+# Xác suất tăng giá <= SELL_THRESHOLD -> BÁN
+# Vùng 45% - 55% -> ĐỨNG NGOÀI / THEO DÕI (Lọc nhiễu thị trường đi ngang)
+BUY_THRESHOLD = 0.55        # 55.0%
+SELL_THRESHOLD = 0.45       # 45.0%
+BUY_THRESHOLD_PCT = 55.0    # Tỷ lệ phần trăm cho Dashboard (55.0%)
+SELL_THRESHOLD_PCT = 45.0   # Tỷ lệ phần trăm cho Dashboard (45.0%)
+

@@ -17,10 +17,10 @@ import numpy as np
 import requests
 
 try:
-    from alert_utils import TELEGRAM_TOKEN, TELEGRAM_CHAT_ID
+    from alert_utils import TELEGRAM_ALERT_TOKEN, TELEGRAM_ALERT_CHAT_ID
 except ImportError:
-    TELEGRAM_TOKEN = ""
-    TELEGRAM_CHAT_ID = ""
+    TELEGRAM_ALERT_TOKEN = ""
+    TELEGRAM_ALERT_CHAT_ID = ""
 
 
 class DataQualityResult:
@@ -62,6 +62,37 @@ class DataQualityResult:
         }
 
 
+def _price_below(left, right):
+    """Ignore only numerical roundoff from adjusted prices and CSV parsing."""
+    return left.lt(right) & ~np.isclose(left, right, rtol=1e-10, atol=1e-12)
+
+
+def _validate_price_observations(df, qa):
+    df = df.copy()
+    columns = ['Open', 'High', 'Low', 'Close', 'Volume']
+    for col in columns:
+        if col in df:
+            df[col] = pd.to_numeric(df[col], errors='coerce')
+            if not np.isfinite(df[col].to_numpy()).all():
+                qa.add_error(f'{col} contains missing or non-finite observations')
+    for col in ['Open', 'High', 'Low', 'Close']:
+        if col in df and df[col].le(0).any():
+            qa.add_error(f'{col} must be positive')
+    if 'Volume' in df and df.Volume.lt(0).any():
+        qa.add_error('Volume must be nonnegative')
+    if {'Date', 'Ticker'}.issubset(df.columns):
+        dates = pd.to_datetime(df.Date, errors='coerce', utc=True)
+        if dates.isna().any() or df.Ticker.isna().any() or df.Ticker.astype(str).str.strip().eq('').any():
+            qa.add_error('Invalid observation date or ticker')
+        if pd.DataFrame({'Date': dates, 'Ticker': df.Ticker}).duplicated().any():
+            qa.add_error('Duplicate ticker-date observations')
+    if all(col in df for col in ['Open', 'High', 'Low', 'Close']):
+        if (_price_below(df.High, df[['Open', 'Close', 'Low']].max(axis=1)) |
+                _price_below(df[['Open', 'Close', 'High']].min(axis=1), df.Low)).any():
+            qa.add_error('Invalid OHLC candle bounds')
+    return df
+
+
 def validate_xgboost_dataset(df: pd.DataFrame, expected_tickers: list = None) -> DataQualityResult:
     """
     Kiểm tra chất lượng bộ dữ liệu đặc trưng bảng (XGBoost).
@@ -71,6 +102,7 @@ def validate_xgboost_dataset(df: pd.DataFrame, expected_tickers: list = None) ->
         qa.add_error("DataFrame dữ liệu rỗng (Empty DataFrame)")
         return qa
 
+    df = _validate_price_observations(df, qa)
     qa.total_rows = len(df)
     qa.total_columns = len(df.columns)
 
@@ -96,7 +128,7 @@ def validate_xgboost_dataset(df: pd.DataFrame, expected_tickers: list = None) ->
             qa.add_error(f"Phát hiện {len(invalid_prices)} bản ghi có giá Close <= 0")
 
     if 'High' in df.columns and 'Low' in df.columns:
-        broken_candles = df[df['High'] < df['Low']]
+        broken_candles = df[_price_below(df['High'], df['Low'])]
         if not broken_candles.empty:
             qa.add_error(f"Phát hiện {len(broken_candles)} bản ghi bất thường có High < Low")
 
@@ -130,6 +162,7 @@ def validate_lstm_dataset(df: pd.DataFrame, min_lookback: int = 30, expected_tic
         qa.add_error("DataFrame LSTM rỗng (Empty DataFrame)")
         return qa
 
+    df = _validate_price_observations(df, qa)
     qa.total_rows = len(df)
     qa.total_columns = len(df.columns)
 
@@ -154,11 +187,11 @@ def validate_lstm_dataset(df: pd.DataFrame, min_lookback: int = 30, expected_tic
 
     # 3. Kiểm tra cấu trúc nến hợp lệ
     if all(c in df.columns for c in ['Open', 'High', 'Low', 'Close']):
-        invalid_high = df[(df['High'] < df['Open']) | (df['High'] < df['Close'])]
+        invalid_high = df[_price_below(df['High'], df[['Open', 'Close']].max(axis=1))]
         if not invalid_high.empty:
             qa.add_error(f"Phát hiện {len(invalid_high)} nến có High nhỏ hơn Open hoặc Close")
 
-        invalid_low = df[(df['Low'] > df['Open']) | (df['Low'] > df['Close'])]
+        invalid_low = df[_price_below(df[['Open', 'Close']].min(axis=1), df['Low'])]
         if not invalid_low.empty:
             qa.add_error(f"Phát hiện {len(invalid_low)} nến có Low lớn hơn Open hoặc Close")
 
@@ -201,12 +234,20 @@ def validate_finbert_dataset(df: pd.DataFrame, expected_tickers: list = None) ->
         if expected_tickers:
             zero_news = set(expected_tickers) - set(qa.tickers_found)
             if zero_news:
-                qa.add_warning(f"Có {len(zero_news)} mã không có tin tức nào trong 7 ngày qua: {sorted(list(zero_news))}")
+                qa.add_warning(f"Có {len(zero_news)} mã không có tin tức trong lần thu thập này: {sorted(list(zero_news))}")
 
     qa.metrics = {
         "total_news_articles": int(len(df)),
         "tickers_with_news": len(qa.tickers_found),
     }
+    # Ingestion coverage is distinct from eligibility for prediction.
+    from news_data import select_eligible_news, NEWS_POLICY
+    news = df.rename(columns={'ticker': 'ma_co_phieu', 'headline': 'tieu_de'})
+    eligible = select_eligible_news(news, pd.Timestamp.now(tz='UTC'))
+    qa.metrics.update({'news_policy': NEWS_POLICY, 'eligible_news_articles': len(eligible),
+                       'tickers_with_eligible_news': int(eligible.ma_co_phieu.nunique()) if not eligible.empty else 0})
+    if len(eligible) < len(df):
+        qa.add_warning(f"{len(df) - len(eligible)} bài chưa đủ nguồn gốc, thời gian hoặc độ mới để dùng cho mô hình.")
     return qa
 
 
@@ -215,12 +256,14 @@ def save_and_alert_quality_report(
     s3_hook,
     bucket_name: str,
     date_str: str,
-    telegram_token: str = TELEGRAM_TOKEN,
-    telegram_chat_id: str = TELEGRAM_CHAT_ID
+    telegram_token: str = None,
+    telegram_chat_id: str = None
 ):
     """
     Lưu kết quả QA lên MinIO và bắn cảnh báo Telegram nếu có lỗi nghiêm trọng.
     """
+    target_token = telegram_token or TELEGRAM_ALERT_TOKEN
+    target_chat_id = telegram_chat_id or TELEGRAM_ALERT_CHAT_ID
     report = qa_result.to_dict()
     key = f"quality/quality_report_{qa_result.dataset_name}_{date_str}.json"
     
@@ -236,7 +279,7 @@ def save_and_alert_quality_report(
         logging.warning(f"⚠️ Không thể lưu báo cáo QA lên MinIO: {e}")
 
     # Nếu có lỗi nghiêm trọng -> Cảnh báo khẩn cấp qua Telegram
-    if not qa_result.is_valid:
+    if not qa_result.is_valid and target_token and target_chat_id:
         msg = (
             f"🚨 <b>CẢNH BÁO DATA QUALITY: {qa_result.dataset_name}</b>\n"
             f"━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
@@ -247,8 +290,8 @@ def save_and_alert_quality_report(
         msg += f"\n⚠️ Vui lòng kiểm tra lại nguồn cấp dữ liệu trước khi train!"
 
         try:
-            url = f"https://api.telegram.org/bot{telegram_token}/sendMessage"
-            requests.post(url, data={'chat_id': telegram_chat_id, 'text': msg, 'parse_mode': 'HTML'}, timeout=10)
+            url = f"https://api.telegram.org/bot{target_token}/sendMessage"
+            requests.post(url, data={'chat_id': target_chat_id, 'text': msg, 'parse_mode': 'HTML'}, timeout=10)
         except Exception as e:
             logging.warning(f"⚠️ Không thể gửi cảnh báo Telegram QA: {e}")
 

@@ -4,14 +4,12 @@ DAG: ĐÁNH GIÁ MÔ HÌNH DỰ BÁO CỔ PHIẾU (EVALUATION PIPELINE)
 Chạy sau khi train xong, thực hiện đánh giá toàn diện 3 mô hình:
   Task 1: evaluate_xgboost
   Task 2: evaluate_lstm
-  Task 3: evaluate_finbert
+  Task 3: evaluate_ensemble
   Task 4: compare_all_models
   Task 5: send_evaluation_report
 """
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import io
-import time
-import requests
 import logging
 import json
 import pandas as pd
@@ -32,11 +30,6 @@ except ImportError:
     TELEGRAM_CHAT_ID = ""
     def send_telegram_safe(url, data=None, files=None, max_retries=3): return False
 
-try:
-    from config_shared import SECTOR_MAP
-except ImportError:
-    from dags.config_shared import SECTOR_MAP
-
 default_args = {
     'owner': 'quant_team',
     'depends_on_past': False,
@@ -44,11 +37,21 @@ default_args = {
     'retries': 1,
     'retry_delay': timedelta(minutes=2),
     'on_failure_callback': telegram_failure_callback,
+    'execution_timeout': timedelta(minutes=20),
 }
 
 
-def _load_valid_dataset(s3_hook, prefix, min_rows=100):
+def _load_valid_dataset(s3_hook, prefix, min_rows=100, dataset_key=None, expected_sha256=None):
     """Tải dataset hợp lệ mới nhất từ MinIO."""
+    if dataset_key is not None:
+        import hashlib
+        raw = s3_hook.read_key(dataset_key, bucket_name=BUCKET_NAME)
+        if expected_sha256 and hashlib.sha256(raw.encode('utf-8')).hexdigest() != expected_sha256:
+            raise ValueError('Training dataset was overwritten; holdout evaluation cannot be reproduced')
+        df = pd.read_csv(io.StringIO(raw))
+        if len(df) < min_rows:
+            raise ValueError('Recorded training dataset is too small')
+        return df
     keys = s3_hook.list_keys(bucket_name=BUCKET_NAME, prefix=prefix)
     if not keys:
         return None
@@ -64,6 +67,25 @@ def _load_valid_dataset(s3_hook, prefix, min_rows=100):
             continue
     return None
 
+def evaluation_temporal_masks(df, hyperparameters):
+    """Xác định training và test masks theo metadata đã ghi nhận."""
+    from pipeline_data import temporal_masks, rolling_temporal_masks
+
+    if not hyperparameters:
+        return temporal_masks(df)
+
+    keys = {'split_policy', 'train_start', 'validation_start', 'test_start', 'test_end'}
+    if any(k in hyperparameters for k in keys):
+        try:
+            train_mask, val_mask, test_mask, _ = rolling_temporal_masks(
+                df, split_metadata=hyperparameters
+            )
+            return train_mask, test_mask
+        except Exception as e:
+            raise ValueError(f"Incomplete/unknown evaluation metadata: {e}")
+    else:
+        return temporal_masks(df)
+
 
 # ==============================================================================
 #  TASK 1: ĐÁNH GIÁ XGBOOST
@@ -78,42 +100,63 @@ def evaluate_xgboost_task(**context):
         run_time_series_cv,
         save_evaluation_to_minio
     )
-    from model_registry import XGBoostModelBuilder, save_model_to_minio
+    from model_registry import XGBoostModelBuilder
 
     s3_hook = S3Hook(aws_conn_id=MINIO_CONN_ID)
-    date_nodash = datetime.now().strftime("%Y%m%d")
+    dag_run_conf = getattr(context.get('dag_run'), 'conf', None) or {}
+    date_nodash = datetime.now(timezone.utc).strftime("%Y%m%d")
 
-    # 1. Đọc dataset
-    df = _load_valid_dataset(s3_hook, "xgboost/xgboost_stock_20tickers_10y_")
+    # 2. Train & Đánh giá (dùng ModelBuilder)
+    from model_registry import load_evaluation_model
+    import xgboost as xgb
+    builder = XGBoostModelBuilder()
+
+    # Load model instead of retraining
+    artifacts = load_evaluation_model(s3_hook, BUCKET_NAME, "xgboost", dag_run_conf.get('pipeline_run_id'))
+    version = artifacts['model_card'].model_version if artifacts else None
+    if not artifacts or not artifacts.get('model_bytes'):
+        logging.warning(f"Không tìm thấy artifact XGBoost {version}, bỏ qua đánh giá nhánh này.")
+        return
+
+    builder.model = xgb.XGBClassifier()
+    builder.model.load_model(bytearray(artifacts['model_bytes']))
+    builder.model_card = artifacts['model_card']
+    if builder.model_card.hyperparameters.get('dataset_key'):
+        df = _load_valid_dataset(s3_hook, "xgboost/", dataset_key=builder.model_card.hyperparameters['dataset_key'],
+                                 expected_sha256=builder.model_card.hyperparameters.get('dataset_sha256'))
+    else:
+        df = _load_valid_dataset(s3_hook, "xgboost/xgboost_stock_20tickers_10y_")
     if df is None:
         raise ValueError("❌ Không tìm thấy dataset XGBoost hợp lệ!")
 
-    # 2. Train & Đánh giá (dùng ModelBuilder)
-    builder = XGBoostModelBuilder()
-    train_metrics = builder.train(df)
-
     # 3. Đánh giá chi tiết trên test set
-    df_processed, feature_cols = builder.preprocess(df)
-    train_mask = df_processed['Date_Std'] < pd.Timestamp('2024-01-01')
-    if train_mask.sum() < 200:
-        split_idx = int(len(df_processed) * 0.8)
-        test_mask = df_processed.index >= split_idx
-    else:
-        test_mask = ~train_mask
+    df_processed, _ = builder.preprocess(
+        df, feature_policy=builder.model_card.hyperparameters.get('feature_policy', 'legacy'))
+    feature_cols = artifacts['feature_columns']
+    if not feature_cols or set(feature_cols) - set(df_processed.columns):
+        raise ValueError('Evaluation requires the exact trained feature schema')
+    train_mask, test_mask = evaluation_temporal_masks(df_processed, builder.model_card.hyperparameters)
 
     X_test = df_processed.loc[test_mask, feature_cols].values
     y_test = df_processed.loc[test_mask, 'Target_Std'].values
     y_prob = builder.model.predict_proba(X_test)[:, 1]
 
-    eval_metrics = evaluate_binary_classifier(y_test, y_prob, "XGBoost")
+    threshold = builder.model_card.hyperparameters.get('decision_threshold', 0.5)
+    eval_metrics = evaluate_binary_classifier(y_test, y_prob, "XGBoost", decision_threshold=threshold)
+    eval_metrics.update({'status': 'ok', 'evaluation_source': 'trained_model_holdout_v2',
+                         'evaluation_date': datetime.now(timezone.utc).isoformat(),
+                         'model_version': version, 'prediction_horizon': 1,
+                         'test_start': str(df_processed.loc[test_mask, 'Date_Std'].min()),
+                         'test_end': str(df_processed.loc[test_mask, 'Date_Std'].max())})
 
     # 4. Classification Report
-    report = generate_classification_report_text(y_test, y_prob, "XGBoost")
+    report = generate_classification_report_text(y_test, y_prob, "XGBoost", decision_threshold=threshold)
     logging.info(report)
 
     # 5. Cross-Validation (TimeSeriesSplit)
-    X_all = df_processed[feature_cols].values
-    y_all = df_processed['Target_Std'].values
+    df_train = df_processed[train_mask & df_processed['Target_Std'].notna()]
+    X_all = df_train[feature_cols].values
+    y_all = df_train['Target_Std'].values
 
     def xgb_builder_fn(X_tr, y_tr):
         m = xgb.XGBClassifier(
@@ -124,20 +167,13 @@ def evaluate_xgboost_task(**context):
         m.fit(X_tr, y_tr)
         return m
 
-    cv_metrics = run_time_series_cv(X_all, y_all, xgb_builder_fn, n_splits=5, model_name="XGBoost")
+    cv_metrics = run_time_series_cv(X_all, y_all, xgb_builder_fn, n_splits=5, model_name="XGBoost", dates=df_train['Date_Std'])
 
     # 6. Cập nhật metrics vào model card
-    full_metrics = {**eval_metrics, **cv_metrics}
+    full_metrics = {**builder.model_card.metrics, **eval_metrics, **cv_metrics}
     builder.model_card.metrics = full_metrics
 
-    # 7. Lưu model + evaluation lên MinIO
-    save_model_to_minio(
-        s3_hook=s3_hook,
-        bucket_name=BUCKET_NAME,
-        model_type='xgboost',
-        model_card=builder.model_card,
-        model_bytes=builder.serialize()
-    )
+    # 7. Cập nhật evaluation lên MinIO
 
     save_evaluation_to_minio(s3_hook, BUCKET_NAME, 'xgboost', full_metrics, date_nodash)
 
@@ -161,61 +197,94 @@ def evaluate_lstm_task(**context):
         typing_extensions.TypeIs = _TypeIs
 
     import torch
-    from sklearn.metrics import accuracy_score, roc_auc_score
     from model_evaluator import (
         evaluate_binary_classifier,
         generate_classification_report_text,
         save_evaluation_to_minio
     )
-    from model_registry import LSTMModelBuilder, save_model_to_minio
+    from model_registry import LSTMModelBuilder
 
     s3_hook = S3Hook(aws_conn_id=MINIO_CONN_ID)
-    date_nodash = datetime.now().strftime("%Y%m%d")
+    dag_run_conf = getattr(context.get('dag_run'), 'conf', None) or {}
+    date_nodash = datetime.now(timezone.utc).strftime("%Y%m%d")
 
-    # 1. Đọc dataset
-    df = _load_valid_dataset(s3_hook, "lstm/lstm_stock_20tickers_10y_")
+    # 2. Train & Đánh giá
+    from model_registry import load_evaluation_model
+    import pickle
+    builder = LSTMModelBuilder()
+
+    # Load model instead of retraining
+    artifacts = load_evaluation_model(s3_hook, BUCKET_NAME, "lstm", dag_run_conf.get('pipeline_run_id'))
+    version = artifacts['model_card'].model_version if artifacts else None
+    if not artifacts or not artifacts.get('model_bytes'):
+        logging.warning(f"Không tìm thấy artifact LSTM {version}, bỏ qua đánh giá nhánh này.")
+        return
+
+    builder.hyperparams.update(artifacts['model_card'].hyperparameters)
+    builder.model = builder._build_model_class()(len(artifacts['feature_columns']))
+    builder.model.load_state_dict(torch.load(io.BytesIO(artifacts['model_bytes']), weights_only=True, map_location='cpu'))
+    if artifacts.get('scaler_bytes'):
+        builder.scaler = pickle.loads(artifacts['scaler_bytes'])
+    builder.model_card = artifacts['model_card']
+    if builder.model_card.hyperparameters.get('dataset_key'):
+        df = _load_valid_dataset(s3_hook, "lstm/", dataset_key=builder.model_card.hyperparameters['dataset_key'],
+                                 expected_sha256=builder.model_card.hyperparameters.get('dataset_sha256'))
+    else:
+        df = _load_valid_dataset(s3_hook, "lstm/lstm_stock_20tickers_10y_")
     if df is None:
         raise ValueError("❌ Không tìm thấy dataset LSTM hợp lệ!")
 
-    # 2. Train & Đánh giá
-    builder = LSTMModelBuilder()
-    train_metrics = builder.train(df)
-
     # 3. Đánh giá chi tiết trên test set
-    df_processed, feature_cols = builder.preprocess(df)
+    df_processed, _ = builder.preprocess(
+        df, feature_policy=builder.model_card.hyperparameters.get('feature_policy', 'legacy'))
+    feature_cols = artifacts['feature_columns']
+    if not feature_cols or set(feature_cols) - set(df_processed.columns):
+        raise ValueError('Evaluation requires the exact trained feature schema')
     lookback = builder.hyperparams['lookback']
-    temp = builder.hyperparams['temperature']
+    if artifacts.get('scaler_bytes') is None:
+        raise ValueError('LSTM evaluation requires its trained scaler')
 
-    test_df = df_processed[df_processed['Date_Std'] >= '2024-01-01'].copy()
+    train_mask, test_mask = evaluation_temporal_masks(df_processed, builder.model_card.hyperparameters)
+
+    test_df = df_processed.copy()
     test_df[feature_cols] = builder.scaler.transform(test_df[feature_cols].values)
 
-    X_test, y_test = builder._create_sequences(test_df, feature_cols, lookback)
+    X_test, y_test = builder._create_sequences(test_df, feature_cols, lookback, mask=test_mask)
 
     if len(X_test) > 0:
         builder.model.eval()
+        from torch.utils.data import TensorDataset, DataLoader
+        test_dataset = TensorDataset(torch.tensor(X_test))
+        batch_size = builder.hyperparams.get('batch_size', 128)
+        if batch_size not in [128, 256]:
+            batch_size = 128
+        test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
+        all_logits = []
         with torch.no_grad():
-            test_logits = builder.model(torch.tensor(X_test)).numpy()
-            y_prob = 1.0 / (1.0 + np.exp(-test_logits / temp))
+            for (bx,) in test_loader:
+                all_logits.append(builder.model(bx).numpy())
+        test_logits = np.concatenate(all_logits)
+        y_prob = torch.sigmoid(torch.tensor(test_logits)).numpy()
 
-        eval_metrics = evaluate_binary_classifier(y_test, y_prob, "LSTM")
+        threshold = builder.model_card.hyperparameters.get('decision_threshold', 0.5)
+        eval_metrics = {**evaluate_binary_classifier(y_test, y_prob, "LSTM", decision_threshold=threshold), 'status': 'ok'}
 
-        report = generate_classification_report_text(y_test, y_prob, "LSTM")
+        report = generate_classification_report_text(y_test, y_prob, "LSTM", decision_threshold=threshold)
         logging.info(report)
     else:
-        eval_metrics = {'accuracy': 0.5, 'auc_roc': 0.5, 'total_samples': 0}
+        eval_metrics = {'status': 'unavailable', 'accuracy': None, 'auc_roc': None, 'total_samples': 0}
+
+    test_dates = df_processed.loc[test_mask, 'Date_Std'] if test_mask.any() else test_df['Date_Std']
+    eval_metrics.update({'evaluation_source': 'trained_model_holdout_v2',
+                         'evaluation_date': datetime.now(timezone.utc).isoformat(),
+                         'model_version': version, 'prediction_horizon': 1,
+                         'test_start': str(test_dates.min()),
+                         'test_end': str(test_dates.max())})
 
     # 4. Cập nhật model card
-    builder.model_card.metrics = eval_metrics
+    builder.model_card.metrics = {**builder.model_card.metrics, **eval_metrics}
 
-    # 5. Lưu model + scaler + evaluation lên MinIO
-    save_model_to_minio(
-        s3_hook=s3_hook,
-        bucket_name=BUCKET_NAME,
-        model_type='lstm',
-        model_card=builder.model_card,
-        model_bytes=builder.serialize_model(),
-        scaler_bytes=builder.serialize_scaler()
-    )
+    # 5. Cập nhật evaluation lên MinIO
 
     save_evaluation_to_minio(s3_hook, BUCKET_NAME, 'lstm', eval_metrics, date_nodash)
 
@@ -224,76 +293,41 @@ def evaluate_lstm_task(**context):
 
 
 # ==============================================================================
-#  TASK 3: ĐÁNH GIÁ FINBERT
+#  TASK 3: ĐÁNH GIÁ VÀ HUẤN LUYỆN ENSEMBLE
 # ==============================================================================
 
-def evaluate_finbert_task(**context):
-    """Đánh giá FinBERT bằng cách đối chiếu sentiment vs giá thực tế."""
-    from model_evaluator import (
-        evaluate_finbert_sentiment,
-        save_evaluation_to_minio
-    )
-    from model_registry import save_model_to_minio, ModelCard
+def evaluate_ensemble_task(**context):
+    """Evaluate issued weighted T+1 signals; fit a separate research Ensemble."""
+    from model_evaluator import evaluate_binary_classifier, save_evaluation_to_minio
     from chart_utils import load_price_data_from_minio
-
+    from forecast_history import load_forecast_history, observed_forecasts
+    from learned_signals import train_signal_model
+    from signal_formulas import ENSEMBLE_SOURCE, ENSEMBLE_FORMULA_VERSION
     s3_hook = S3Hook(aws_conn_id=MINIO_CONN_ID)
-    date_nodash = datetime.now().strftime("%Y%m%d")
-    today_str = datetime.now().strftime("%Y-%m-%d")
-
-    # 1. Đọc kết quả dự báo FinBERT mới nhất
-    keys = s3_hook.list_keys(bucket_name=BUCKET_NAME, prefix="finbert/du_bao_tang_truong_finbert_")
-    if not keys:
-        logging.warning("⚠️ Không tìm thấy kết quả FinBERT để đánh giá")
-        context['ti'].xcom_push(key='finbert_eval', value=json.dumps({}))
-        return
-
-    latest_key = sorted(keys)[-1]
-    raw = s3_hook.read_key(latest_key, bucket_name=BUCKET_NAME)
-    df_pred = pd.read_csv(io.StringIO(raw))
-
-    # Thêm prob_num nếu chưa có
-    if 'prob_num' not in df_pred.columns:
-        df_pred['prob_num'] = df_pred['xac_suat_tang_gia'].str.replace('%', '').astype(float) / 100.0
-
-    # 2. Đọc dữ liệu giá lịch sử
-    df_prices = load_price_data_from_minio(s3_hook, BUCKET_NAME)
-
-    # 3. Đánh giá sentiment vs giá thực tế
-    eval_metrics = evaluate_finbert_sentiment(df_pred, df_prices, prediction_horizon=5)
-
-    # 4. Tạo model card cho FinBERT
-    model_card = ModelCard(
-        model_name="FinBERT Sentiment Analysis (ProsusAI/finbert)",
-        model_version=f"v{date_nodash}",
-        trained_date=today_str,
-        model_type="finbert",
-        dataset_size=len(df_pred),
-        num_tickers=df_pred['ma_co_phieu'].nunique(),
-        hyperparameters={
-            'model_name': 'ProsusAI/finbert',
-            'max_length': 128,
-            'buy_threshold': 0.55,
-            'sell_threshold': 0.45
-        },
-        metrics=eval_metrics,
-        notes=f"Evaluated on {eval_metrics.get('total_evaluated', 0)} tickers with T+5 price verification"
-    )
-
-    # 5. Lưu model card + evaluation
-    save_model_to_minio(
-        s3_hook=s3_hook,
-        bucket_name=BUCKET_NAME,
-        model_type='finbert',
-        model_card=model_card,
-        extra_artifacts={
-            'pipeline_config.json': json.dumps(model_card.hyperparameters, indent=2),
-        }
-    )
-
-    save_evaluation_to_minio(s3_hook, BUCKET_NAME, 'finbert', eval_metrics, date_nodash)
-
-    context['ti'].xcom_push(key='finbert_eval', value=json.dumps(eval_metrics, default=str))
-    logging.info("✅ Đánh giá FinBERT hoàn tất!")
+    prices = load_price_data_from_minio(s3_hook, BUCKET_NAME)
+    ensemble_history = load_forecast_history(s3_hook, BUCKET_NAME, 'ensemble')
+    observed, _, _ = observed_forecasts(ensemble_history, prices, horizon=1)
+    current_history = ensemble_history
+    if not ensemble_history.empty:
+        source = ensemble_history.get('inference_source', pd.Series('', index=ensemble_history.index))
+        version = ensemble_history.get('model_version', pd.Series('', index=ensemble_history.index))
+        current_history = ensemble_history[source.eq(ENSEMBLE_SOURCE) & version.eq(ENSEMBLE_FORMULA_VERSION)]
+    current, pending, invalid = observed_forecasts(current_history, prices, horizon=1)
+    ensemble_metrics = {'status': 'unavailable', 'accuracy': None, 'auc_roc': None,
+                        'total_samples': 0, 'pending_samples': pending, 'invalid_samples': invalid,
+                        'evaluation_source': 'issued_weighted_forecasts_v1', 'ensemble_method': ENSEMBLE_FORMULA_VERSION,
+                        'evaluation_date': datetime.now(timezone.utc).isoformat(), 'prediction_horizon': 1}
+    if not current.empty and 'prob_num' in current:
+        probabilities = pd.to_numeric(current['prob_num'], errors='coerce')
+        valid = probabilities.between(0, 1)
+        if valid.any():
+            ensemble_metrics.update(evaluate_binary_classifier(current.loc[valid, 'actual_up'].to_numpy(),
+                                                               probabilities.loc[valid].to_numpy(), 'Ensemble 35/35/30'))
+            ensemble_metrics['status'] = 'ok'
+    save_evaluation_to_minio(s3_hook, BUCKET_NAME, 'ensemble', ensemble_metrics)
+    context['ti'].xcom_push(key='ensemble_eval', value=json.dumps(ensemble_metrics, default=str))
+    training = train_signal_model(s3_hook.get_conn(), BUCKET_NAME, 'ensemble', observed)
+    context['ti'].xcom_push(key='ensemble_training', value=json.dumps(training, default=str))
 
 
 # ==============================================================================
@@ -325,9 +359,9 @@ def compare_all_models_task(**context):
     if lstm_eval:
         eval_results['LSTM'] = json.loads(lstm_eval)
 
-    finbert_eval = ti.xcom_pull(key='finbert_eval', task_ids='evaluate_finbert')
-    if finbert_eval:
-        eval_results['FinBERT'] = json.loads(finbert_eval)
+    ensemble_eval = ti.xcom_pull(key='ensemble_eval', task_ids='evaluate_ensemble')
+    if ensemble_eval:
+        eval_results['Ensemble Master'] = json.loads(ensemble_eval)
 
     if not eval_results:
         logging.warning("⚠️ Không có kết quả đánh giá nào để so sánh")
@@ -413,7 +447,7 @@ def evaluate_all_models_task(**context):
     logging.info("=" * 60)
     logging.info("📰 ĐÁNH GIÁ FINBERT")
     logging.info("=" * 60)
-    evaluate_finbert_task(**mock_ctx)
+    evaluate_ensemble_task(**mock_ctx)
 
     logging.info("=" * 60)
     logging.info("📊 SO SÁNH 3 MÔ HÌNH")
@@ -435,7 +469,7 @@ with DAG(
     default_args=default_args,
     schedule_interval=None,
     catchup=False,
-    tags=['evaluation', 'metrics', 'xgboost', 'lstm', 'finbert', 'cross_validation']
+    tags=['evaluation', 'metrics', 'xgboost', 'lstm', 'ensemble', 'cross_validation']
 ) as dag:
 
     dag.doc_md = """
@@ -445,7 +479,7 @@ with DAG(
 DAG phụ trách đánh giá khoa học và khách quan hiệu năng của cả 3 mô hình học máy theo tiêu chuẩn công bố khoa học:
 - **XGBoost (Tabular):** Đánh giá trên tập test độc lập + TimeSeriesSplit 5-Fold Cross-Validation.
 - **LSTM (PyTorch):** Đánh giá chuỗi nến test set và ma trận nhầm lẫn (Confusion Matrix).
-- **FinBERT (NLP):** Đối chiếu xác suất sentiment với biến động giá thực tế T+5 của thị trường.
+- **Ensemble:** Kiểm chứng tín hiệu tổng hợp 35/35/30 theo T+1; huấn luyện thêm mô hình học trọng số để nghiên cứu.
 
 ### 2. Bộ Chỉ Số Đánh Giá Đầy Đủ
 | Chỉ Số | Ý Nghĩa Thực Tiễn Trong Tài Chính |
@@ -457,7 +491,6 @@ DAG phụ trách đánh giá khoa học và khách quan hiệu năng của cả 
 | **F1-Score** | Trung bình điều hòa cân bằng giữa Precision và Recall |
 | **Confusion Matrix** | Bảng chi tiết: TP (True Positive), FP, TN, FN |
 | **TimeSeriesSplit CV** | Đo lường độ ổn định (Mean ± Std) qua 5 giai đoạn thị trường khác nhau |
-| **Sentiment Correlation**| Hệ số tương quan Pearson giữa điểm cảm xúc tin tức và lợi suất giá thực tế |
 
 ### 3. Đầu Ra MinIO & Kênh Phân Phối
 - **Báo cáo JSON từng model:** `evaluation/{model_type}/eval_YYYYMMDD.json`
@@ -477,9 +510,9 @@ DAG phụ trách đánh giá khoa học và khách quan hiệu năng của cả 
         provide_context=True,
     )
 
-    eval_finbert = PythonOperator(
-        task_id='evaluate_finbert',
-        python_callable=evaluate_finbert_task,
+    eval_ensemble = PythonOperator(
+        task_id='evaluate_ensemble',
+        python_callable=evaluate_ensemble_task,
         provide_context=True,
     )
 
@@ -496,4 +529,4 @@ DAG phụ trách đánh giá khoa học và khách quan hiệu năng của cả 
     )
 
     # Task flow: eval 3 models song song → compare → send report
-    [eval_xgb, eval_lstm, eval_finbert] >> compare_task >> send_report
+    [eval_xgb, eval_lstm, eval_ensemble] >> compare_task >> send_report

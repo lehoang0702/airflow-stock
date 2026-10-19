@@ -69,6 +69,23 @@ class TestConfigIntegrity(unittest.TestCase):
             self.assertTrue(len(meta['name']) > 0, f"{ticker} có name rỗng")
 
 
+class TestMinioComposeConnection(unittest.TestCase):
+    def test_airflow_services_share_minio_connection(self):
+        import json
+        from pathlib import Path
+        import yaml
+
+        root = Path(__file__).resolve().parents[1]
+        config = yaml.safe_load((root / 'docker-compose.yaml').read_text())
+        for service in ('airflow-init', 'airflow-webserver', 'airflow-scheduler'):
+            environment = dict(item.split('=', 1) for item in config['services'][service]['environment'])
+            connection = json.loads(environment['AIRFLOW_CONN_MINIO_CONN'])
+            self.assertEqual(connection['conn_type'], 'aws')
+            self.assertEqual(connection['extra']['endpoint_url'], '${MINIO_ENDPOINT_URL:-http://minio:9000}')
+            self.assertEqual(environment['AWS_ACCESS_KEY_ID'], '${MINIO_ROOT_USER:-minioadmin}')
+            self.assertEqual(environment['AWS_SECRET_ACCESS_KEY'], '${MINIO_ROOT_PASSWORD:-minioadmin}')
+
+
 class TestDataValidator(unittest.TestCase):
     """Kiểm thử module data_validator (logic thuần, không cần S3)."""
 
@@ -139,3 +156,68 @@ class TestHyperparameterTuner(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+class TestCrossSectionalAndTemporalMasks(unittest.TestCase):
+    def setUp(self):
+        import pandas as pd
+        import numpy as np
+        dates = pd.date_range('2020-01-01', periods=10).tolist() * 3
+        tickers = ['AAPL']*10 + ['MSFT']*10 + ['GOOGL']*10
+        ret_1d = [0.01, 0.02, -0.01, 0.03, 0.00]*6
+        future_ret = [0.03, -0.01, 0.00, 0.05, 0.02]*6
+        
+        self.df = pd.DataFrame({
+            'Date_Std': dates,
+            'Ticker_Std': tickers,
+            'ret_1d': ret_1d,
+            'rsi_14': np.random.uniform(30, 70, 30),
+            'future_return_1d': future_ret,
+            'Target_Std': [1, 0, 0, 1, 1]*6
+        })
+        self.df['Date_Std'] = pd.to_datetime(self.df['Date_Std'])
+
+    def test_add_cross_sectional_features(self):
+        from pipeline_data import add_cross_sectional_features
+        df_out, cs_features = add_cross_sectional_features(self.df.copy())
+        
+        self.assertIn('cs_rank_ret1', cs_features)
+        self.assertIn('cs_rel_ret1', cs_features)
+        self.assertIn('cs_rank_rsi14', cs_features)
+        
+        # Verify correctness for the first date
+        first_date = df_out['Date_Std'].iloc[0]
+        slice_first_date = df_out[df_out['Date_Std'] == first_date]
+        mean_ret1 = slice_first_date['ret_1d'].mean()
+        
+        rel_diff = slice_first_date['ret_1d'].iloc[0] - mean_ret1
+        self.assertAlmostEqual(slice_first_date['cs_rel_ret1'].iloc[0], rel_diff)
+
+    def test_temporal_masks_max_train_years(self):
+        from pipeline_data import temporal_masks
+        import pandas as pd
+        
+        train_mask, test_mask = temporal_masks(
+            self.df.copy(), 
+            cutoff='2020-01-08', 
+            max_train_years=3, 
+            min_return_threshold=0.0
+        )
+        
+        # Dates must be < boundary (2020-01-08) and >= 2017-01-08
+        self.assertTrue(train_mask.any())
+        self.assertTrue(test_mask.any())
+
+    def test_temporal_masks_min_return_threshold(self):
+        from pipeline_data import temporal_masks
+        
+        train_mask, test_mask = temporal_masks(
+            self.df.copy(), 
+            cutoff='2020-01-08', 
+            max_train_years=3, 
+            min_return_threshold=0.015
+        )
+        
+        df_train = self.df[train_mask]
+        # Check if min return threshold is respected
+        self.assertTrue((df_train['future_return_1d'].abs() >= 0.015).all())
+

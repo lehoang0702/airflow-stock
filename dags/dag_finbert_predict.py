@@ -1,11 +1,9 @@
 """
 DAG: CHẠY MÔ HÌNH FINBERT & DỰ BÁO SENTIMENT (TÍCH HỢP RETRY TELEGRAM & TIMEOUT AN TOÀN)
-Lưu file vào MinIO: stock-data/finbert/du_bao_tang_truong_finbert_YYYYMMDD.csv
+Lưu file vào MinIO: stock-data/finbert/sentiment_finbert_YYYYMMDD.csv
 """
 from datetime import datetime, timedelta
 import io
-import time
-import requests
 import logging
 import pandas as pd
 import numpy as np
@@ -37,227 +35,134 @@ default_args = {
     'retries': 1,
     'retry_delay': timedelta(minutes=2),
     'on_failure_callback': telegram_failure_callback,
+    'execution_timeout': timedelta(minutes=30),
 }
 
 def predict_finbert_task(**context):
-    import typing_extensions
-    if not hasattr(typing_extensions, 'TypeIs'):
-        class _TypeIsMeta(type):
-            def __getitem__(self, item): return bool
-        class _TypeIs(metaclass=_TypeIsMeta): pass
-        typing_extensions.TypeIs = _TypeIs
-
     import torch
+    from datetime import timezone
     from transformers import AutoTokenizer, AutoModelForSequenceClassification
+    from sentiment_utils import SENTIMENT_PREFIX, sentiment_summary
+    from signal_formulas import finbert_signal, signal_action, FINBERT_FORMULA_VERSION
+    from pipeline_storage import new_model_version
+    from chart_utils import load_price_data_from_minio
 
     s3_hook = S3Hook(aws_conn_id=MINIO_CONN_ID)
-    date_nodash = datetime.now().strftime("%Y%m%d")
-    today_str = datetime.now().strftime("%Y-%m-%d")
-
-    news_key = f"finbert/finbert_news_20tickers_{date_nodash}.csv"
-    if not s3_hook.check_for_key(news_key, bucket_name=BUCKET_NAME):
-        keys = s3_hook.list_keys(bucket_name=BUCKET_NAME, prefix="finbert/finbert_news_20tickers_")
-        if not keys:
-            raise FileNotFoundError("❌ Không tìm thấy file tin tức trên MinIO finbert/")
-        news_key = sorted(keys)[-1]
-
-    raw_csv = s3_hook.read_key(news_key, bucket_name=BUCKET_NAME)
-    df_news = pd.read_csv(io.StringIO(raw_csv))
-
-    logging.info("🧠 Đang nạp mô hình FinBERT...")
-    model_name = "ProsusAI/finbert"
-    tokenizer = AutoTokenizer.from_pretrained(model_name)
-    model = AutoModelForSequenceClassification.from_pretrained(model_name)
-    model.eval()
-
-    results = []
-    sentiment_stats = {}
-    for (ticker, sector), group in df_news.groupby(['ma_co_phieu', 'nhom_nganh']):
-        scores = []
-        pos_count, neg_count, neu_count = 0, 0, 0
-        for idx, row in group.iterrows():
-            title = str(row.get('tieu_de', '') or '')
-            summary = str(row.get('tom_tat', '') or '')
-            text_to_eval = f"{title}. {summary}".strip() if summary and summary != 'nan' else title
-            inputs = tokenizer(text_to_eval, return_tensors="pt", truncation=True, max_length=128)
-            with torch.no_grad():
-                logits = model(**inputs).logits
-                probs = torch.nn.functional.softmax(logits, dim=-1)[0].numpy()
-            
-            score = float(probs[0] - probs[1])
-            scores.append(score)
-
-            if probs[0] > probs[1] and probs[0] > probs[2]:
-                pos_count += 1
-            elif probs[1] > probs[0] and probs[1] > probs[2]:
-                neg_count += 1
-            else:
-                neu_count += 1
-
-        if scores:
-            avg_score = float(np.mean(scores))
-            prob_up = float(np.clip((avg_score + 1.0) / 2.0, 0.05, 0.95))
-        else:
-            avg_score = 0.0
-            prob_up = 0.50
-
-        # Chuẩn hóa ngưỡng quyết định (Confidence Threshold Filtering)
-        # Lọc nhiễu vùng phân vân 0.45 - 0.55 -> ĐỨNG NGOÀI, chỉ MUA khi >= 0.55, BÁN khi <= 0.45
-        if prob_up >= 0.55:
-            rec = "MUA"
-            trend = "Tăng mạnh" if prob_up >= 0.60 else "Tăng tích lũy"
-            conf = "Rất cao" if prob_up >= 0.60 else "Cao"
-        elif prob_up <= 0.45:
-            rec = "BÁN"
-            trend = "Giảm mạnh" if prob_up <= 0.40 else "Giảm phân phối"
-            conf = "Rất cao" if prob_up <= 0.40 else "Cao"
-        else:
-            rec = "ĐỨNG NGOÀI"
-            trend = "Đi ngang / Lưỡng lự (Sideway)"
-            conf = "Trung bình"
-
-        results.append({
-            'ngay_du_bao': today_str,
-            'ma_co_phieu': ticker,
-            'nhom_nganh': sector,
-            'khuyen_nghi': rec,
-            'xac_suat_tang_gia': f"{prob_up*100:.2f}%",
-            'xu_huong_du_kien': trend,
-            'do_tin_cay': conf,
-            'do_chinh_xac_mo_hinh': 'Xem bao cao danh gia',
-            'chi_so_auc': 'Xem bao cao danh gia',
-            'prob_num': prob_up
-        })
-
-        sentiment_stats[ticker] = {
-            'positive': pos_count,
-            'negative': neg_count,
-            'neutral': neu_count,
-            'total_news': len(scores),
-            'avg_score': round(avg_score, 4)
-        }
-
-    df_res = pd.DataFrame(results)
-
-    # Lưu model artifact (pipeline config + sentiment stats) lên MinIO
-    try:
-        from model_registry import ModelCard, save_model_to_minio
-        total_news = sum(s['total_news'] for s in sentiment_stats.values())
-        model_card = ModelCard(
-            model_name='FinBERT Sentiment Analysis (ProsusAI/finbert)',
-            model_version=f'v{date_nodash}',
-            trained_date=today_str,
-            model_type='finbert',
-            dataset_size=total_news,
-            num_tickers=len(sentiment_stats),
-            hyperparameters={
-                'model_name': 'ProsusAI/finbert',
-                'max_length': 128,
-                'buy_threshold': 0.55,
-                'sell_threshold': 0.45
-            },
-            metrics={},
-            notes=f'Pre-trained. {total_news} tin tuc phan tich'
-        )
-        import json as _json
-        save_model_to_minio(
-            s3_hook, BUCKET_NAME, 'finbert', model_card,
-            extra_artifacts={
-                'pipeline_config.json': _json.dumps(model_card.hyperparameters, indent=2),
-                'sentiment_stats.json': _json.dumps(sentiment_stats, indent=2, ensure_ascii=False)
-            }
-        )
-    except Exception as e:
-        logging.warning(f'⚠️ Không thể lưu model registry FinBERT: {e}')
-
-    # 1. Lưu kết quả MinIO (Nhiệm vụ cốt lõi)
-    csv_buffer = io.StringIO()
-    df_res.to_csv(csv_buffer, index=False, encoding='utf-8-sig')
-    predict_key = f"finbert/du_bao_tang_truong_finbert_{date_nodash}.csv"
-
-    s3_hook.load_string(
-        string_data=csv_buffer.getvalue(),
-        key=predict_key,
-        bucket_name=BUCKET_NAME,
-        replace=True
-    )
-    logging.info(f"✅ Đã lưu kết quả FinBERT lên MinIO an toàn: {predict_key}")
-
-    # 2. Gửi Telegram với cơ chế chống rớt mạng
-    buy_list = df_res[df_res['khuyen_nghi'] == 'MUA']
-    sell_list = df_res[df_res['khuyen_nghi'] == 'BÁN']
-
-    msg_lines = [
-        "📰 <b>BẢN TIN DỰ BÁO SENTIMENT (FINBERT NLP)</b>",
-        f"📅 <b>Dữ liệu phiên:</b> {today_str}",
-        "🎯 <b>Mô hình:</b> ProsusAI/finbert (Đánh giá chi tiết tại DAG Model Evaluation)",
-        "━━━━━━━━━━━━━━━━━━━━",
-        ""
-    ]
-
-    if not buy_list.empty:
-        msg_lines.append("🟢 <b>TOP CỔ PHIẾU TIN TỨC TÍCH CỰC (MUA):</b>")
-        for _, r in buy_list.iterrows():
-            msg_lines.append(f"✅ <b>{r['ma_co_phieu']}</b> ({r['nhom_nganh']}): {r['khuyen_nghi']}")
-            msg_lines.append(f"   ■ Tỷ lệ tăng: <b>{r['xac_suat_tang_gia']}</b> | Tin cậy: {r['do_tin_cay']}")
-        msg_lines.append("")
-
-    if not sell_list.empty:
-        msg_lines.append("🔴 <b>CẢNH BÁO TIN TỨC TIÊU CỰC (BÁN):</b>")
-        for _, r in sell_list.iterrows():
-            msg_lines.append(f"🔻 <b>{r['ma_co_phieu']}</b>: {r['xu_huong_du_kien']} ({r['xac_suat_tang_gia']})")
+    stamp = datetime.now(timezone.utc)
+    date_nodash = stamp.strftime('%Y%m%d')
+    today_str = stamp.strftime('%Y-%m-%d')
+    keys = s3_hook.list_keys(bucket_name=BUCKET_NAME, prefix='finbert/finbert_news_20tickers_') or []
+    if not keys:
+        raise ValueError('Không có dữ liệu tin tức để chạy FinBERT.')
+    # CSV is the daily primary view; parquet can be stale after a failed upload.
+    parquet_keys = sorted([k for k in keys if k.endswith('.parquet')])
+    csv_keys = sorted([k for k in keys if k.endswith('.csv')])
+    current_csv = [key for key in csv_keys if date_nodash in key]
+    current_parquet = [key for key in parquet_keys if date_nodash in key]
+    news_key = current_csv[-1] if current_csv else current_parquet[-1] if current_parquet else None
+    if not news_key:
+        raise ValueError('Không tìm thấy file tin tức (.parquet hoặc .csv) hợp lệ.')
+    obj = s3_hook.get_key(news_key, bucket_name=BUCKET_NAME)
+    raw_bytes = obj.get()["Body"].read()
+    if news_key.endswith('.parquet'):
+        df_news = pd.read_parquet(io.BytesIO(raw_bytes))
     else:
-        msg_lines.append("🔴 <b>CẢNH BÁO BÁN:</b> Không có cảnh báo tin xấu.")
+        df_news = pd.read_csv(io.BytesIO(raw_bytes), encoding='utf-8', encoding_errors='replace')
+    # News from an earlier crawl cannot be issued as a fresh prediction.
+    if date_nodash not in news_key:
+        raise ValueError('Dữ liệu tin tức chưa cập nhật cho lần dự báo này.')
+    prices = load_price_data_from_minio(s3_hook, BUCKET_NAME)
+    references = (prices.sort_values('Date').groupby('Ticker')['Date'].last().to_dict()
+                  if not prices.empty else {})
+    from news_data import select_eligible_news, NEWS_POLICY
+    import hashlib
+    from uuid import uuid4
+    df_news = select_eligible_news(df_news, stamp)
+    tokenizer = AutoTokenizer.from_pretrained('ProsusAI/finbert') if not df_news.empty else None
+    model = AutoModelForSequenceClassification.from_pretrained('ProsusAI/finbert') if not df_news.empty else None
+    if model is not None:
+        model.eval()
+    labels = {str(label).lower(): int(index) for index, label in model.config.id2label.items()} if model is not None else {}
+    results, scored_articles = [], []
+    for ticker, sector in SECTOR_MAP.items():
+        group = df_news[df_news.ma_co_phieu.eq(ticker)]
+        outputs = []
+        for _, row in group.iterrows():
+            title = str(row.get('tieu_de', '')).strip()
+            if not title or title == 'nan':
+                continue
+            summary = str(row.get('tom_tat', '')).strip()
+            text = title + ('. ' + summary if summary and summary != 'nan' else '')
+            inputs = tokenizer(text, return_tensors='pt', truncation=True, max_length=128)
+            with torch.no_grad():
+                probabilities = torch.softmax(model(**inputs).logits, dim=-1)[0].numpy()
+                outputs.append(probabilities)
+                scored_articles.append({**row.to_dict(),
+                    **{f'sentiment_{label}': float(probabilities[labels[label]]) for label in ('positive', 'negative', 'neutral')},
+                    'sentiment_scored_at': datetime.now(timezone.utc).isoformat(),
+                    'sentiment_model_version': 'ProsusAI/finbert', 'news_source_key': news_key,
+                    'news_source_sha256': hashlib.sha256(raw_bytes).hexdigest()})
+        if not outputs:
+            results.append({'ngay_du_bao': today_str, 'ma_co_phieu': ticker, 'nhom_nganh': sector,
+                            'sentiment_label': 'Chưa có cảm xúc', 'issued_at': datetime.now(timezone.utc).isoformat(),
+                            'reference_date': pd.Timestamp(references[ticker]).strftime('%Y-%m-%d') if ticker in references else None,
+                            'sentiment_model_version': None,
+                            'news_count': len(outputs), 'news_missing': not outputs, 'news_policy': NEWS_POLICY,
+                            'inference_source': 'unavailable', 'sentiment_positive': None,
+                            'sentiment_negative': None, 'sentiment_neutral': None})
+            continue
+        mean_probs = np.mean(outputs, axis=0)
+        sentiment = {f'sentiment_{label}': float(mean_probs[labels[label]])
+                     for label in ('positive', 'negative', 'neutral')}
+        results.append({'ngay_du_bao': today_str, 'ma_co_phieu': ticker, 'nhom_nganh': sector,
+                        'sentiment_label': sentiment_summary(sentiment),
+                        'issued_at': datetime.now(timezone.utc).isoformat(),
+                        'reference_date': pd.Timestamp(references[ticker]).strftime('%Y-%m-%d') if ticker in references else None,
+                        'sentiment_model_version': 'ProsusAI/finbert', 'news_count': len(outputs),
+                        'news_sources': ' | '.join(sorted(set(group.nha_xuat_ban.dropna().astype(str)))) if 'nha_xuat_ban' in group else '',
+                        'news_missing': False, 'news_policy': NEWS_POLICY, 'news_source_key': news_key,
+                        'news_source_sha256': hashlib.sha256(raw_bytes).hexdigest(),
+                        'inference_source': 'sentiment_model_v2', **sentiment})
+    if not results:
+        raise ValueError('Chưa có tin tức và giá tham chiếu hợp lệ để dự báo.')
+    frame = pd.DataFrame(results)
+    frame['prob_num'] = [finbert_signal(row) for row in results]
+    frame['xac_suat_tang_gia'] = frame['prob_num'].apply(lambda score: f'{score * 100:.2f}%' if pd.notna(score) else None)
+    frame['khuyen_nghi'] = frame['prob_num'].apply(lambda score: signal_action(score) if pd.notna(score) else 'Không khả dụng')
+    frame['score_policy'] = FINBERT_FORMULA_VERSION
+    frame['score_type'] = 'sentiment_signal'
 
-    # Gửi tin nhắn Text
-    url_msg = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    send_telegram_safe(url_msg, data={'chat_id': TELEGRAM_CHAT_ID, 'text': "\n".join(msg_lines), 'parse_mode': 'HTML'})
+    conf = getattr(context.get('dag_run'), 'conf', None) or {}
+    frame['pipeline_run_id'] = conf.get('pipeline_run_id')
+    if scored_articles:
+        scored_key = f"news_sentiment_history/{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S%f')}_{uuid4().hex}.csv"
+        s3_hook.load_string(string_data=pd.DataFrame(scored_articles).to_csv(index=False),
+                            key=scored_key, bucket_name=BUCKET_NAME, replace=False)
+    s3_hook.load_string(string_data=frame.to_csv(index=False),
+                        key=f"sentiment_history/finbert/{stamp.strftime('%Y%m%dT%H%M%S%f')}_{uuid4().hex}.csv",
+                        bucket_name=BUCKET_NAME, replace=False)
+    s3_hook.load_string(string_data=frame.to_csv(index=False),
+                        key=f'{SENTIMENT_PREFIX}{date_nodash}.csv',
+                        bucket_name=BUCKET_NAME, replace=True)
+    logging.info('FinBERT processed %s tickers and %s articles.', len(frame), frame['news_count'].sum())
+    from model_registry import ModelCard, save_model_to_minio
+    card = ModelCard(model_name='FinBERT news sentiment',
+                     model_version=new_model_version(), trained_date=today_str, model_type='finbert',
+                     dataset_size=int(frame['news_count'].sum()), num_tickers=len(frame),
+                     hyperparameters={'model_name': 'ProsusAI/finbert', 'max_length': 128},
+                     metrics={}, notes='News sentiment and legacy linear sentiment signal for 35/35/30 Ensemble.')
+    save_model_to_minio(s3_hook, BUCKET_NAME, 'finbert', card,
+                        extra_artifacts={'sentiment_outputs.json': frame.to_json(orient='records')})
+    if TELEGRAM_TOKEN and TELEGRAM_CHAT_ID:
+        text = (f'📰 FinBERT — {today_str}\nĐã phân tích {len(frame)} mã từ mô hình pretrained.\n'
+                f"Số tin đã phân tích: {int(frame['news_count'].sum())}.\n"
+                'Kết quả gồm cảm xúc tích cực, tiêu cực và trung tính.')
+        send_telegram_safe(f'https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage',
+                           data={'chat_id': TELEGRAM_CHAT_ID, 'text': text})
+        send_telegram_safe(f'https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendDocument',
+                           data={'chat_id': TELEGRAM_CHAT_ID},
+                           files={'document': (f'finbert_{date_nodash}.csv', frame.to_csv(index=False).encode(), 'text/csv')})
 
-    # Gửi file CSV
-    url_doc = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendDocument"
-    csv_bytes = csv_buffer.getvalue().encode('utf-8-sig')
-    files = {'document': (f"du_bao_tang_truong_finbert_{date_nodash}.csv", csv_bytes, 'text/csv')}
-    send_telegram_safe(url_doc, data={'chat_id': TELEGRAM_CHAT_ID, 'caption': '📊 Bảng phân tích chi tiết FinBERT Sentiment 20 mã'}, files=files)
-
-    # === CHART DỰ BÁO GIÁ CỔ PHIẾU (20 file riêng lẻ + ZIP) ===
-    try:
-        from chart_utils import generate_individual_charts, save_charts_zip_minio_and_telegram, load_price_data_from_minio
-
-        # FinBERT không có dữ liệu giá → đọc từ dataset LSTM trên MinIO (có cột Close thực)
-        df_prices = load_price_data_from_minio(s3_hook, BUCKET_NAME)
-
-        if not df_prices.empty:
-            # Thêm prob_num vào results để chart dùng
-            for r in results:
-                prob_str = r['xac_suat_tang_gia'].replace('%', '')
-                r['prob_num'] = float(prob_str) / 100.0
-
-            # Tạo 20 chart riêng lẻ
-            chart_files = generate_individual_charts(
-                df_price_history=df_prices,
-                ticker_predictions=results,
-                model_name='FinBERT',
-                today_str=today_str
-            )
-
-            # Lưu MinIO + nén ZIP + gửi Telegram
-            save_charts_zip_minio_and_telegram(
-                chart_files=chart_files,
-                s3_hook=s3_hook,
-                bucket_name=BUCKET_NAME,
-                minio_folder=f"finbert/charts_{date_nodash}/",
-                zip_filename=f"charts_finbert_{date_nodash}.zip",
-                telegram_token=TELEGRAM_TOKEN,
-                telegram_chat_id=TELEGRAM_CHAT_ID,
-                caption=f'📰 Biểu đồ dự báo giá 20 mã cổ phiếu - FinBERT ({today_str})\n📦 20 tệp PNG trong tệp ZIP',
-                send_telegram_fn=send_telegram_safe
-            )
-        else:
-            logging.warning("⚠️ Không có dữ liệu giá để vẽ chart FinBERT")
-    except Exception as e:
-        logging.warning(f"⚠️ Không thể tạo chart FinBERT: {e}")
-        import traceback
-        logging.warning(traceback.format_exc())
 
 
 with DAG(
@@ -268,28 +173,10 @@ with DAG(
     tags=['finbert', 'prediction', 'minio', 'telegram', 'nlp']
 ) as dag:
 
-    dag.doc_md = r"""
-# 📰 DAG: Suy Luận Cảm Xúc Tài Chính (FinBERT NLP Sentiment)
----
-### 1. Tổng Quan Mô Hình NLP
-DAG sử dụng mô hình ngôn ngữ lớn chuyên ngành tài chính **FinBERT** (`ProsusAI/finbert`) dựa trên kiến trúc **BERT (Bidirectional Encoder Representations from Transformers)**:
-- Đã được pre-train trên kho ngữ liệu tài chính khổng lồ (Financial PhraseBank, SEC 10-K filings, Reuters).
-- Phân loại sắc thái cảm xúc cho từng tiêu đề tin tức thành 3 nhãn: `Positive`, `Negative`, `Neutral`.
-
-### 2. Công Thức Tính Điểm & Chuyển Đổi Xác Suất
-1. **Sentiment Raw Score:** $\text{score}_i = P(\text{Positive}) - P(\text{Negative}) \in [-1.0, 1.0]$.
-2. **Điểm trung bình theo mã:** $\overline{S} = \frac{1}{N}\sum_{i=1}^N \text{score}_i$.
-3. **Xác suất tăng giá ước lượng:** $P_{\text{up}} = \text{clip}\left(\frac{\overline{S} + 1.0}{2.0}, 0.05, 0.95\right)$.
-4. **Ngưỡng hành động:**
-   - $P_{\text{up}} \ge 54\%$ ➔ Khuyến nghị **MUA** (Tăng mạnh nếu $\ge 60\%$).
-   - $P_{\text{up}} \le 46\%$ ➔ Khuyến nghị **BÁN** (Giảm mạnh nếu $\le 40\%$).
-   - Khoảng $46\% - 54\%$ ➔ **ĐỨNG NGOÀI (Sideway)**.
-
-### 3. Đầu Ra & Trực Quan Hóa
-- **File dự báo:** `stock-data/finbert/du_bao_tang_truong_finbert_YYYYMMDD.csv`
-- **Báo cáo phân tích:** Gửi bảng phân loại sắc thái tin tức 20 mã và CSV qua Telegram.
-- **Model Registry:** Lưu `pipeline_config.json` và `sentiment_stats.json`.
-"""
+    dag.doc_md = """FinBERT phân loại cảm xúc tin tức: tích cực, tiêu cực, trung tính.
+Điểm tín hiệu = clip((1 + positive - negative) / 2, 0.05, 0.95).
+Master kết hợp 35% XGBoost, 35% LSTM, 30% điểm FinBERT.
+Lưu thời điểm phân tích, nguồn tin và phiên bản mô hình cho mỗi quan sát."""
 
     predict_finbert = PythonOperator(
         task_id='predict_finbert_sentiment',

@@ -4,7 +4,7 @@ MODULE: MODEL EVALUATOR — ĐÁNH GIÁ MÔ HÌNH HỆ THỐNG
 Đánh giá mô hình toàn diện với đầy đủ metrics khoa học:
 - Accuracy, AUC-ROC, Precision, Recall, F1-Score, Confusion Matrix
 - TimeSeriesSplit Cross-Validation (5-fold)
-- FinBERT Sentiment Accuracy (đối chiếu vs giá thực tế)
+- Historical price-direction forecast evaluation
 - So sánh phiên bản & xuất báo cáo
 
 Schema MinIO:
@@ -16,7 +16,7 @@ import io
 import json
 import logging
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -36,7 +36,9 @@ from sklearn.metrics import (
 # ==============================================================================
 
 def evaluate_binary_classifier(y_true: np.ndarray, y_prob: np.ndarray,
-                               model_name: str = "Model") -> Dict[str, Any]:
+                               model_name: str = "Model", dates=None,
+                               decision_threshold: float = 0.5,
+                               confidence_margin: float = 0.05) -> Dict[str, Any]:
     """
     Đánh giá đầy đủ mô hình phân loại nhị phân.
 
@@ -48,14 +50,18 @@ def evaluate_binary_classifier(y_true: np.ndarray, y_prob: np.ndarray,
     Returns:
         Dict chứa toàn bộ metrics
     """
-    y_pred = (y_prob >= 0.5).astype(int)
+    y_true, y_prob = np.asarray(y_true), np.asarray(y_prob)
+    if len(y_true) == 0 or len(y_true) != len(y_prob):
+        raise ValueError('Evaluation requires matched, nonempty observations')
+    if not np.isfinite(y_prob).all() or not ((y_prob >= 0) & (y_prob <= 1)).all():
+        raise ValueError('Invalid model probabilities')
+    if not np.isfinite(decision_threshold) or not 0 < decision_threshold < 1:
+        raise ValueError('Invalid decision threshold')
+    y_pred = (y_prob >= decision_threshold).astype(int)
 
     # Metrics cơ bản
     acc = float(accuracy_score(y_true, y_pred))
-    try:
-        auc = float(roc_auc_score(y_true, y_prob))
-    except Exception:
-        auc = 0.5
+    auc = float(roc_auc_score(y_true, y_prob)) if len(np.unique(y_true)) == 2 else None
 
     # Per-class metrics
     prec = float(precision_score(y_true, y_pred, zero_division=0))
@@ -68,12 +74,28 @@ def evaluate_binary_classifier(y_true: np.ndarray, y_prob: np.ndarray,
     f1_0 = float(f1_score(y_true, y_pred, pos_label=0, zero_division=0))
 
     # Confusion Matrix: [[TN, FP], [FN, TP]]
-    cm = confusion_matrix(y_true, y_pred)
+    cm = confusion_matrix(y_true, y_pred, labels=[0, 1])
     tn, fp, fn, tp = cm.ravel() if cm.size == 4 else (0, 0, 0, 0)
+
+    high_conv_mask = (y_prob >= 0.5 + confidence_margin) | (y_prob <= 0.5 - confidence_margin)
+    if np.any(high_conv_mask):
+        high_conv_samples = int(np.sum(high_conv_mask))
+        high_conv_acc = round(float(accuracy_score(y_true[high_conv_mask], (y_prob[high_conv_mask] >= decision_threshold).astype(int))), 4)
+        high_conv_coverage = round(float(high_conv_samples / len(y_true)), 4)
+    else:
+        high_conv_samples = 0
+        high_conv_acc = None
+        high_conv_coverage = 0.0
 
     metrics = {
         'accuracy': round(acc, 4),
-        'auc_roc': round(auc, 4),
+        'accuracy_at_0_5': round(float(accuracy_score(y_true, y_prob >= 0.5)), 4),
+        'decision_threshold': float(decision_threshold),
+        'confidence_margin': float(confidence_margin),
+        'high_conviction_samples': high_conv_samples,
+        'high_conviction_accuracy': high_conv_acc,
+        'high_conviction_coverage': high_conv_coverage,
+        'auc_roc': round(auc, 4) if auc is not None else None,
         'precision_class1': round(prec, 4),
         'recall_class1': round(rec, 4),
         'f1_score_class1': round(f1, 4),
@@ -90,7 +112,7 @@ def evaluate_binary_classifier(y_true: np.ndarray, y_prob: np.ndarray,
     }
 
     logging.info(
-        f"📊 {model_name} | Acc: {acc*100:.2f}% | AUC: {auc:.4f} | "
+        f"📊 {model_name} | Acc: {acc*100:.2f}% | AUC: {auc} | "
         f"Prec: {prec*100:.2f}% | Rec: {rec*100:.2f}% | F1: {f1*100:.2f}%"
     )
 
@@ -98,18 +120,18 @@ def evaluate_binary_classifier(y_true: np.ndarray, y_prob: np.ndarray,
 
 
 def generate_classification_report_text(y_true: np.ndarray, y_prob: np.ndarray,
-                                        model_name: str = "Model") -> str:
+                                         model_name: str = "Model", decision_threshold: float = 0.5) -> str:
     """
     Xuất Classification Report dạng text table (per-class metrics).
 
     Returns:
         String chứa bảng Classification Report chuẩn sklearn
     """
-    y_pred = (y_prob >= 0.5).astype(int)
+    y_pred = (y_prob >= decision_threshold).astype(int)
 
     report = classification_report(
         y_true, y_pred,
-        target_names=["Giam (0)", "Tang (1)"],
+        labels=[0, 1], target_names=["Giam (0)", "Tang (1)"],
         digits=4,
         zero_division=0
     )
@@ -119,128 +141,45 @@ def generate_classification_report_text(y_true: np.ndarray, y_prob: np.ndarray,
 
 
 # ==============================================================================
-#  ĐÁNH GIÁ FINBERT SENTIMENT (ĐỐI CHIẾU VS GIÁ THỰC TẾ)
+#  ĐÁNH GIÁ LỊCH SỬ DỰ BÁO HƯỚNG GIÁ
 # ==============================================================================
 
-def evaluate_finbert_sentiment(predictions: pd.DataFrame,
+def evaluate_direction_forecasts(predictions: pd.DataFrame,
                                price_data: pd.DataFrame,
                                prediction_horizon: int = 5) -> Dict[str, Any]:
-    """
-    Đánh giá FinBERT bằng cách đối chiếu sentiment dự báo vs biến động giá thực tế.
-
-    Logic:
-    - Lấy kết quả FinBERT dự báo tuần trước (hoặc phiên gần nhất có đủ dữ liệu T+5)
-    - So sánh: nếu FinBERT dự báo MUA → giá có thực sự tăng sau 5 phiên không?
-    - Tính: Sentiment Accuracy, Correlation, Confusion Matrix
-
-    Args:
-        predictions: DataFrame chứa cột ['ma_co_phieu', 'khuyen_nghi', 'prob_num']
-        price_data: DataFrame chứa cột ['Date', 'Ticker', 'Close']
-        prediction_horizon: Số phiên để kiểm chứng (mặc định 5)
-
-    Returns:
-        Dict chứa metrics đánh giá FinBERT
-    """
-    if predictions.empty or price_data.empty:
-        logging.warning("⚠️ Không đủ dữ liệu để đánh giá FinBERT sentiment")
-        return {'sentiment_accuracy': 0.0, 'sentiment_correlation': 0.0, 'total_evaluated': 0}
-
-    price_data = price_data.copy()
-    price_data['Date'] = pd.to_datetime(price_data['Date'])
-    price_data = price_data.sort_values(['Ticker', 'Date'])
-
-    y_true_list = []
-    y_pred_list = []
-    prob_list = []
-
-    for _, row in predictions.iterrows():
-        ticker = row['ma_co_phieu']
-        prob = float(row.get('prob_num', 0.5))
-
-        ticker_prices = price_data[price_data['Ticker'] == ticker].copy()
-        if len(ticker_prices) < prediction_horizon + 1:
-            continue
-
-        # Giá phiên cuối cùng tính từ cuối dataset
-        last_idx = len(ticker_prices) - prediction_horizon - 1
-        if last_idx < 0:
-            continue
-
-        price_at_prediction = float(ticker_prices.iloc[last_idx]['Close'])
-        price_after_horizon = float(ticker_prices.iloc[-1]['Close'])
-
-        # Ground truth: giá có tăng sau T+5 không?
-        actual_up = 1 if price_after_horizon > price_at_prediction else 0
-
-        # Prediction: FinBERT dự báo tăng (prob >= 0.5) hay không
-        pred_up = 1 if prob >= 0.5 else 0
-
-        y_true_list.append(actual_up)
-        y_pred_list.append(pred_up)
-        prob_list.append(prob)
-
-    if not y_true_list:
-        logging.warning("⚠️ Không tìm thấy đủ dữ liệu giá để kiểm chứng FinBERT")
-        return {'sentiment_accuracy': 0.0, 'sentiment_correlation': 0.0, 'total_evaluated': 0}
-
-    y_true = np.array(y_true_list)
-    y_pred = np.array(y_pred_list)
-    y_prob = np.array(prob_list)
-
-    # Tính metrics
-    sent_acc = float(accuracy_score(y_true, y_pred))
-
-    # Tương quan giữa sentiment score và biến động giá
-    try:
-        price_changes = []
-        for _, row in predictions.iterrows():
-            ticker = row['ma_co_phieu']
-            ticker_prices = price_data[price_data['Ticker'] == ticker]
-            if len(ticker_prices) >= prediction_horizon + 1:
-                last_idx = len(ticker_prices) - prediction_horizon - 1
-                p0 = float(ticker_prices.iloc[last_idx]['Close'])
-                p1 = float(ticker_prices.iloc[-1]['Close'])
-                price_changes.append((p1 - p0) / p0)
-            else:
-                price_changes.append(0.0)
-        correlation = float(np.corrcoef(prob_list[:len(price_changes)], price_changes[:len(prob_list)])[0, 1])
-        if np.isnan(correlation):
-            correlation = 0.0
-    except Exception:
-        correlation = 0.0
-
-    try:
-        sent_auc = float(roc_auc_score(y_true, y_prob))
-    except Exception:
-        sent_auc = 0.5
-
-    cm = confusion_matrix(y_true, y_pred)
-    tn, fp, fn, tp = cm.ravel() if cm.size == 4 else (0, 0, 0, 0)
-
-    prec = float(precision_score(y_true, y_pred, zero_division=0))
-    rec = float(recall_score(y_true, y_pred, zero_division=0))
-    f1 = float(f1_score(y_true, y_pred, zero_division=0))
-
-    metrics = {
-        'sentiment_accuracy': round(sent_acc, 4),
-        'sentiment_auc_roc': round(sent_auc, 4),
-        'sentiment_correlation': round(correlation, 4),
-        'precision_class1': round(prec, 4),
-        'recall_class1': round(rec, 4),
-        'f1_score_class1': round(f1, 4),
-        'true_positives': int(tp),
-        'false_positives': int(fp),
-        'true_negatives': int(tn),
-        'false_negatives': int(fn),
-        'total_evaluated': int(len(y_true))
+    """Score issued, trained direction forecasts after their exact horizon."""
+    from forecast_history import observed_forecasts
+    observed, pending, invalid = observed_forecasts(predictions, price_data, prediction_horizon)
+    result = {
+        'status': 'unavailable', 'sentiment_accuracy': None,
+        'sentiment_auc_roc': None, 'sentiment_correlation': None,
+        'total_evaluated': 0, 'total_samples': 0,
+        'pending_samples': pending, 'invalid_samples': invalid,
+        'prediction_horizon': prediction_horizon,
+        'evaluation_source': 'issued_trained_forecasts_v2',
+        'evaluation_date': datetime.now().isoformat(),
+        'message': 'Chưa có dự báo từ mô hình đã huấn luyện đủ phiên để kiểm chứng.'
     }
-
-    logging.info(
-        f"📰 FinBERT Sentiment | Acc: {sent_acc*100:.2f}% | AUC: {sent_auc:.4f} | "
-        f"Correlation: {correlation:.4f} | Evaluated: {len(y_true)} mã"
-    )
-
-    return metrics
+    if observed.empty or 'prob_num' not in observed:
+        return result
+    probabilities = pd.to_numeric(observed['prob_num'], errors='coerce')
+    valid = probabilities.between(0, 1) & observed.get(
+        'inference_source', pd.Series('', index=observed.index)).eq('trained_model_v2')
+    observed = observed.loc[valid].copy()
+    if observed.empty:
+        return result
+    probabilities = probabilities.loc[valid].to_numpy()
+    metrics = evaluate_binary_classifier(observed['actual_up'].to_numpy(), probabilities, 'Price direction')
+    changes = observed['actual_return'].to_numpy()
+    correlation = (float(np.corrcoef(probabilities, changes)[0, 1])
+                   if len(changes) > 1 and np.std(changes) > 0 and np.std(probabilities) > 0 else None)
+    return {**result, **metrics, 'status': 'ok', 'message': None,
+            'sentiment_accuracy': metrics['accuracy'],
+            'sentiment_auc_roc': metrics['auc_roc'],
+            'sentiment_correlation': correlation,
+            'total_evaluated': len(observed),
+            'test_start': str(observed['reference_date'].min()),
+            'test_end': str(observed['outcome_date'].max().date())}
 
 
 # ==============================================================================
@@ -249,7 +188,7 @@ def evaluate_finbert_sentiment(predictions: pd.DataFrame,
 
 def run_time_series_cv(X: np.ndarray, y: np.ndarray,
                        model_builder_fn, n_splits: int = 5,
-                       model_name: str = "Model") -> Dict[str, Any]:
+                       model_name: str = "Model", dates=None) -> Dict[str, Any]:
     """
     Chạy TimeSeriesSplit cross-validation để đánh giá tính ổn định của mô hình.
 
@@ -270,7 +209,9 @@ def run_time_series_cv(X: np.ndarray, y: np.ndarray,
     fold_aucs = []
     fold_details = []
 
-    for fold_idx, (train_idx, test_idx) in enumerate(tscv.split(X)):
+    from pipeline_data import date_folds
+    folds = date_folds(dates, n_splits) if dates is not None else tscv.split(X)
+    for fold_idx, (train_idx, test_idx) in enumerate(folds):
         X_train, X_test = X[train_idx], X[test_idx]
         y_train, y_test = y[train_idx], y[test_idx]
 
@@ -280,19 +221,17 @@ def run_time_series_cv(X: np.ndarray, y: np.ndarray,
             y_pred = (y_prob >= 0.5).astype(int)
 
             fold_acc = float(accuracy_score(y_test, y_pred))
-            try:
-                fold_auc = float(roc_auc_score(y_test, y_prob))
-            except Exception:
-                fold_auc = 0.5
+            fold_auc = float(roc_auc_score(y_test, y_prob)) if len(np.unique(y_test)) == 2 else None
 
             fold_accs.append(fold_acc)
-            fold_aucs.append(fold_auc)
+            if fold_auc is not None:
+                fold_aucs.append(fold_auc)
             fold_details.append({
                 'fold': fold_idx + 1,
                 'train_size': len(train_idx),
                 'test_size': len(test_idx),
                 'accuracy': round(fold_acc, 4),
-                'auc_roc': round(fold_auc, 4)
+                'auc_roc': round(fold_auc, 4) if fold_auc is not None else None
             })
         except Exception as e:
             logging.warning(f"⚠️ CV Fold {fold_idx+1} thất bại: {e}")
@@ -309,20 +248,20 @@ def run_time_series_cv(X: np.ndarray, y: np.ndarray,
         cv_result = {
             'cv_accuracy_mean': round(float(np.mean(fold_accs)), 4),
             'cv_accuracy_std': round(float(np.std(fold_accs)), 4),
-            'cv_auc_mean': round(float(np.mean(fold_aucs)), 4),
-            'cv_auc_std': round(float(np.std(fold_aucs)), 4),
+            'cv_auc_mean': round(float(np.mean(fold_aucs)), 4) if fold_aucs else None,
+            'cv_auc_std': round(float(np.std(fold_aucs)), 4) if fold_aucs else None,
             'n_splits': n_splits,
             'fold_details': fold_details
         }
         logging.info(
             f"🔄 {model_name} CV ({n_splits}-fold) | "
             f"Acc: {cv_result['cv_accuracy_mean']*100:.2f}% ± {cv_result['cv_accuracy_std']*100:.2f}% | "
-            f"AUC: {cv_result['cv_auc_mean']:.4f} ± {cv_result['cv_auc_std']:.4f}"
+            f"AUC: {cv_result['cv_auc_mean']} ± {cv_result['cv_auc_std']}"
         )
     else:
         cv_result = {
-            'cv_accuracy_mean': 0.0, 'cv_accuracy_std': 0.0,
-            'cv_auc_mean': 0.0, 'cv_auc_std': 0.0,
+            'cv_accuracy_mean': None, 'cv_accuracy_std': None,
+            'cv_auc_mean': None, 'cv_auc_std': None,
             'n_splits': n_splits, 'fold_details': fold_details
         }
 
@@ -384,58 +323,27 @@ def generate_evaluation_report(eval_results: Dict[str, Dict],
         ""
     ]
 
+    def number(value, percent=False):
+        if value is None or not np.isfinite(value):
+            return 'Chưa có kết quả'
+        return f'{value * 100:.2f}%' if percent else f'{value:.4f}'
+
     for model_name, metrics in eval_results.items():
-        # Xác định icon theo loại model
-        if 'xgboost' in model_name.lower():
-            icon = "🌲"
-        elif 'lstm' in model_name.lower():
-            icon = "🧠"
-        elif 'finbert' in model_name.lower():
-            icon = "📰"
-        else:
-            icon = "📊"
-
-        msg_lines.append(f"{icon} <b>{model_name}</b>")
-
-        acc = metrics.get('accuracy', metrics.get('sentiment_accuracy', 0))
-        auc = metrics.get('auc_roc', metrics.get('sentiment_auc_roc', 0))
-        prec = metrics.get('precision_class1', 0)
-        rec = metrics.get('recall_class1', 0)
-        f1 = metrics.get('f1_score_class1', 0)
-        total = metrics.get('total_samples', metrics.get('total_evaluated', 0))
-
-        msg_lines.append(f"   ├ Accuracy:  <b>{acc*100:.2f}%</b>")
-        msg_lines.append(f"   ├ AUC-ROC:   <b>{auc:.4f}</b>")
-        msg_lines.append(f"   ├ Precision:  <b>{prec*100:.2f}%</b>")
-        msg_lines.append(f"   ├ Recall:     <b>{rec*100:.2f}%</b>")
-        msg_lines.append(f"   ├ F1-Score:   <b>{f1*100:.2f}%</b>")
-
-        # Confusion Matrix
-        tp = metrics.get('true_positives', 0)
-        fp = metrics.get('false_positives', 0)
-        tn = metrics.get('true_negatives', 0)
-        fn = metrics.get('false_negatives', 0)
-        msg_lines.append(f"   ├ CM: TP={tp} FP={fp} TN={tn} FN={fn}")
-
-        # Correlation (FinBERT)
-        corr = metrics.get('sentiment_correlation')
-        if corr is not None:
-            msg_lines.append(f"   ├ Sentiment-Price Corr: <b>{corr:.4f}</b>")
-
-        msg_lines.append(f"   └ Tổng mẫu đánh giá: <b>{total}</b>")
-
-        # Cross-Validation
+        msg_lines.append(f'📊 <b>{model_name}</b>')
+        for title, key, percent in [('Accuracy', 'accuracy', True), ('AUC-ROC', 'auc_roc', False),
+                                    ('Precision', 'precision_class1', True), ('Recall', 'recall_class1', True),
+                                    ('F1', 'f1_score_class1', False)]:
+            value = metrics.get(key)
+            msg_lines.append(f'   {title}: <b>{number(value, percent)}</b>')
+        msg_lines.append(f"   Tổng mẫu đánh giá: {metrics.get('total_samples', metrics.get('total_evaluated', 0))}")
+        msg_lines.append(f"   Ngày đánh giá: {metrics.get('evaluation_date', today_str)}")
+        if metrics.get('message'):
+            msg_lines.append(metrics['message'])
         if cv_results and model_name in cv_results:
             cv = cv_results[model_name]
-            cv_acc = cv.get('cv_accuracy_mean', 0)
-            cv_acc_std = cv.get('cv_accuracy_std', 0)
-            cv_auc = cv.get('cv_auc_mean', 0)
-            cv_auc_std = cv.get('cv_auc_std', 0)
-            msg_lines.append(f"   🔄 <b>Cross-Validation ({cv.get('n_splits', 5)}-fold):</b>")
-            msg_lines.append(f"      ├ CV Acc:  {cv_acc*100:.2f}% ± {cv_acc_std*100:.2f}%")
-            msg_lines.append(f"      └ CV AUC:  {cv_auc:.4f} ± {cv_auc_std:.4f}")
-
-        msg_lines.append("")
+            msg_lines.append(f"   CV Accuracy: {number(cv.get('cv_accuracy_mean'), True)}")
+            msg_lines.append(f"   CV AUC: {number(cv.get('cv_auc_mean'))}")
+        msg_lines.append('')
 
     # Tạo CSV
     df_compare = compare_model_versions(eval_results)

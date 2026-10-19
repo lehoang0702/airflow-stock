@@ -3,11 +3,9 @@ DAG: CÀO TIN TỨC TÀI CHÍNH ĐA NGUỒN CHO 20 MÃ CỔ PHIẾU
 (Hỗ trợ Yahoo Finance API mới + Tự động Fallback Google News RSS)
 Lưu file vào MinIO: stock-data/finbert/finbert_news_20tickers_YYYYMMDD.csv
 """
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import io
 import logging
-import urllib.request
-import xml.etree.ElementTree as ET
 import pandas as pd
 
 from airflow import DAG
@@ -34,162 +32,49 @@ default_args = {
     'retries': 1,
     'retry_delay': timedelta(minutes=5),
     'on_failure_callback': telegram_failure_callback,
+    'execution_timeout': timedelta(minutes=20),
 }
 
-def fetch_rss_news(ticker):
-    """Hàm lấy tin tức đa nguồn (Google News RSS & CNBC) khi Yahoo trả về rỗng hoặc muốn bổ sung."""
-    articles = []
-    # 1. Google News RSS
-    try:
-        url = f"https://news.google.com/rss/search?q={ticker}+stock+OR+{ticker}+earnings&hl=en-US&gl=US&ceid=US:en"
-        req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64)'})
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            tree = ET.fromstring(resp.read())
-            for item in tree.findall('.//item')[:10]:
-                title = item.find('title').text if item.find('title') is not None else ''
-                desc = item.find('description').text if item.find('description') is not None else ''
-                pub_date = item.find('pubDate').text if item.find('pubDate') is not None else ''
-                link = item.find('link').text if item.find('link') is not None else ''
-                if title:
-                    # Làm sạch HTML tag cơ bản trong description
-                    import re
-                    clean_desc = re.sub(r'<[^>]+>', '', desc).strip()
-                    articles.append({
-                        'title': title,
-                        'summary': clean_desc[:300],
-                        'publisher': 'Google News RSS',
-                        'pub_date': pub_date,
-                        'link': link or f"https://news.google.com/search?q={ticker}+stock"
-                    })
-    except Exception as e:
-        logging.warning(f"⚠️ Google News RSS thất bại cho {ticker}: {str(e)}")
-
-    # 2. Bổ sung CNBC RSS Finance
-    try:
-        cnbc_url = f"https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=10000664"
-        req = urllib.request.Request(cnbc_url, headers={'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64)'})
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            tree = ET.fromstring(resp.read())
-            for item in tree.findall('.//item'):
-                title = item.find('title').text if item.find('title') is not None else ''
-                desc = item.find('description').text if item.find('description') is not None else ''
-                link = item.find('link').text if item.find('link') is not None else ''
-                if ticker.lower() in title.lower() or ticker.lower() in desc.lower():
-                    articles.append({
-                        'title': title,
-                        'summary': desc[:300],
-                        'publisher': 'CNBC RSS',
-                        'pub_date': datetime.now().strftime("%Y-%m-%d"),
-                        'link': link or "https://www.cnbc.com/finance/"
-                    })
-                    if len(articles) >= 15:
-                        break
-    except Exception as e:
-        pass
-
-    return articles
+from news_sources import fetch_yahoo_news, fetch_rss_news, collect_ticker_news
 
 def crawl_news_task(**context):
-    import yfinance as yf
+    from uuid import uuid4
+    from news_data import NEWS_COLUMNS, NEWS_POLICY, select_eligible_news
 
-    news_data = []
-    today_str = datetime.now().strftime("%Y-%m-%d")
-    date_nodash = datetime.now().strftime("%Y%m%d")
-
-    logging.info("🚀 Bắt đầu cào tin tức mở rộng 20 mã (15-20 bài/mã, đa nguồn, có tóm tắt)...")
-
+    batches = []
+    failures = {}
+    logging.info("Collecting observed news with publication and collection timestamps.")
     for ticker, sector in SECTOR_MAP.items():
-        articles_found = []
+        batch, retrieval = collect_ticker_news(
+            ticker, sector, yahoo_loader=fetch_yahoo_news, rss_loader=fetch_rss_news,
+            supplement=True, use_cache=False)
+        if retrieval['source_errors']:
+            failures[ticker] = retrieval['source_errors']
+        batches.append(batch)
+        logging.info("%s: %s real article records; %s with verified timestamps.",
+                     ticker, len(batch), int(batch.eligible_for_model.sum()))
 
-        # TẦNG 1: Lấy từ yfinance (hỗ trợ cả schema cũ & mới 2024, lấy cả summary)
-        try:
-            t = yf.Ticker(ticker)
-            raw_news = t.news or []
-            for item in raw_news[:12]:
-                title = ""
-                summary = ""
-                # Schema cũ
-                if 'title' in item and item['title']:
-                    title = item['title'].strip()
-                if 'summary' in item and item['summary']:
-                    summary = item['summary'].strip()
-
-                # Schema mới 2024
-                if 'content' in item and isinstance(item['content'], dict):
-                    title = item['content'].get('title', '').strip() or title
-                    summary = item['content'].get('summary', '').strip() or summary
-
-                publisher = item.get('publisher', 'Yahoo Finance')
-                content_obj = item.get('content', {}) if isinstance(item.get('content'), dict) else {}
-                if 'content' in item and isinstance(item['content'], dict):
-                    provider = item['content'].get('provider', {})
-                    if isinstance(provider, dict) and 'displayName' in provider:
-                        publisher = provider['displayName']
-
-                link = (
-                    content_obj.get('canonicalUrl', {}).get('url')
-                    or content_obj.get('clickThroughUrl', {}).get('url')
-                    or item.get('link')
-                    or f"https://finance.yahoo.com/quote/{ticker}/news/"
-                )
-
-                if title:
-                    articles_found.append({
-                        'title': title,
-                        'summary': summary[:300],
-                        'publisher': publisher,
-                        'pub_date': today_str,
-                        'link': link
-                    })
-        except Exception as e:
-            logging.warning(f"⚠️ Lỗi yfinance mã {ticker}: {str(e)}")
-
-        # TẦNG 2: Bổ sung thêm tin từ RSS (luôn bổ sung để đạt 15-20 bài phong phú)
-        rss_articles = fetch_rss_news(ticker)
-        articles_found.extend(rss_articles)
-
-        # Giới hạn tối đa 20 bài chất lượng nhất
-        articles_found = articles_found[:20]
-
-        # Lưu dữ liệu bài báo
-        if articles_found:
-            for art in articles_found:
-                news_data.append({
-                    'ngay_thu_thap': today_str,
-                    'ma_co_phieu': ticker,
-                    'nhom_nganh': sector,
-                    'tieu_de': art['title'],
-                    'tom_tat': art.get('summary', ''),
-                    'nha_xuat_ban': art['publisher'],
-                    'thoi_gian_dang': art['pub_date'],
-                    'duong_dan': art.get('link', f"https://finance.yahoo.com/quote/{ticker}/news/")
-                })
-            logging.info(f"✅ {ticker}: Đã thu thập thành công {len(articles_found)} bài báo.")
-        else:
-            # Fallback nếu mạng lỗi
-            news_data.append({
-                'ngay_thu_thap': today_str,
-                'ma_co_phieu': ticker,
-                'nhom_nganh': sector,
-                'tieu_de': f"{ticker} quarterly financial outlook and market trading update",
-                'tom_tat': f"Comprehensive market review and quantitative outlook for {ticker} stock performance.",
-                'nha_xuat_ban': 'Market Update',
-                'thoi_gian_dang': today_str
-            })
-
-    df_news = pd.DataFrame(news_data)
+    stamp = datetime.now(timezone.utc)
+    date_nodash = stamp.strftime("%Y%m%d")
+    df_news = pd.concat(batches, ignore_index=True) if batches else pd.DataFrame(columns=NEWS_COLUMNS)
     minio_key = f"finbert/finbert_news_20tickers_{date_nodash}.csv"
-
-    csv_buffer = io.StringIO()
-    df_news.to_csv(csv_buffer, index=False, encoding='utf-8-sig')
-
+    csv_text = df_news.to_csv(index=False)
     s3_hook = S3Hook(aws_conn_id=MINIO_CONN_ID)
-    s3_hook.load_string(
-        string_data=csv_buffer.getvalue(),
-        key=minio_key,
-        bucket_name=BUCKET_NAME,
-        replace=True
-    )
+    archive_key = f"news_history/{stamp.strftime('%Y%m%dT%H%M%S%f')}_{uuid4().hex}.csv"
+    # Immutable observations are the primary record. The daily file is a view.
+    s3_hook.load_string(string_data=csv_text, key=archive_key,
+                        bucket_name=BUCKET_NAME, replace=False)
+    s3_hook.load_string(string_data=csv_text, key=minio_key,
+                        bucket_name=BUCKET_NAME, replace=True)
+    eligible = select_eligible_news(df_news, stamp)
+    import json
+    report = {'news_policy': NEWS_POLICY, 'collected_at': stamp.isoformat(),
+              'archive_key': archive_key, 'rows': len(df_news), 'eligible_rows': len(eligible),
+              'missing_tickers': sorted(set(SECTOR_MAP) - set(eligible.get('ma_co_phieu', []))),
+              'status_counts': df_news.timestamp_status.value_counts().to_dict(),
+              'source_failures': failures}
+    s3_hook.load_string(string_data=json.dumps(report, ensure_ascii=False),
+                        key=archive_key.replace('.csv', '.json'), bucket_name=BUCKET_NAME, replace=False)
 
     # Xuất định dạng Apache Parquet (nén Snappy)
     try:
@@ -232,13 +117,16 @@ with DAG(
 ### 1. Mục Đích & Cơ Chế Thu Thập
 DAG đảm nhiệm tầng **News Ingestion** đa nguồn cho mô hình phân tích cảm xúc ngôn ngữ tự nhiên **FinBERT**:
 - **Cơ chế tải kép (Dual-Source Fallback):**
-  1. *Nguồn 1:* Yahoo Finance News API (Trích xuất các tin tức tài chính chính thống mới nhất trong 72h).
+  1. *Nguồn 1:* Yahoo Finance RSS (Trích xuất các tin tức tài chính chính thống mới nhất trong 72h).
   2. *Nguồn 2:* Tự động kích hoạt Google News RSS Fallback nếu Yahoo Finance bị chặn hoặc không trả về bài viết.
 - Quét qua **20 mã cổ phiếu lớn**, phân bổ theo ngành và chuẩn hóa cấu trúc dữ liệu.
 
 ### 2. Định Dạng Dữ Liệu Thu Thập
-Bao gồm các trường:
-- `ngay_cao`, `ma_co_phieu`, `nhom_nganh`, `tieu_de`, `nguon_tin`, `thoi_gian_dang`.
+Mỗi phiên bản bài báo lưu `published_at`, `first_seen_at`, `available_at`,
+`story_id`, `article_version`, nguồn URL và trạng thái timestamp. Thiếu tin
+được ghi nhận bằng số lượng 0; không tạo bài thay thế. Chỉ tin có nguồn và
+thời gian hợp lệ mới được dùng cho mô hình. Mọi lần thu thập lưu bất biến
+trong `news_history/`; file ngày là bản xem mới nhất.
 
 ### 3. Đầu Ra MinIO
 - **Artifact:** `stock-data/finbert/finbert_news_20tickers_YYYYMMDD.csv`
