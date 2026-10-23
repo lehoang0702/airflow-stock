@@ -35,7 +35,9 @@ def load_inputs(s3, bucket, kind):
     def keys(prefix):
         return [item['Key'] for page in s3.get_paginator('list_objects_v2').paginate(
             Bucket=bucket, Prefix=prefix) for item in page.get('Contents', [])]
-    found_keys = keys(f'{kind}/{kind}_stock_20tickers_5y_') or keys(f'{kind}/{kind}_stock_20tickers_10y_')
+    found_keys = (keys(f'{kind}/{kind}_stock_100tickers_5y_')
+                  or keys(f'{kind}/{kind}_stock_20tickers_5y_')
+                  or keys(f'{kind}/{kind}_stock_20tickers_10y_'))
     data_key = sorted(key for key in found_keys if key.endswith('.csv'))[-1]
     card_key = sorted(key for key in keys(f'models/{kind}/')
                       if key.endswith('/model_card.json'))[-1]

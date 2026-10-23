@@ -74,7 +74,9 @@ def get_market_data():
         return result
 
     latest_prices = {}
-    price_key = get_latest_s3_key(s3, "lstm/lstm_stock_20tickers_5y_") or get_latest_s3_key(s3, "lstm/lstm_stock_20tickers_10y_")
+    price_key = (get_latest_s3_key(s3, "lstm/lstm_stock_100tickers_5y_")
+                 or get_latest_s3_key(s3, "lstm/lstm_stock_20tickers_5y_")
+                 or get_latest_s3_key(s3, "lstm/lstm_stock_20tickers_10y_"))
     if price_key:
         try:
             df_p = read_s3_dataframe(s3, price_key)
@@ -217,7 +219,9 @@ def get_ticker_chart(ticker: str):
     news = []
 
     if s3:
-        price_key = get_latest_s3_key(s3, "lstm/lstm_stock_20tickers_5y_") or get_latest_s3_key(s3, "lstm/lstm_stock_20tickers_10y_")
+        price_key = (get_latest_s3_key(s3, "lstm/lstm_stock_100tickers_5y_")
+                     or get_latest_s3_key(s3, "lstm/lstm_stock_20tickers_5y_")
+                     or get_latest_s3_key(s3, "lstm/lstm_stock_20tickers_10y_"))
         if price_key:
             try:
                 df = read_s3_dataframe(s3, price_key)
@@ -236,7 +240,8 @@ def get_ticker_chart(ticker: str):
     batch, news_report = collect_ticker_news(ticker, SECTOR_MAP.get(ticker, 'General'))
     eligible = select_eligible_news(batch, pd.Timestamp.now(tz='UTC'))
     if eligible.empty and s3:
-        news_key = get_latest_s3_key(s3, 'finbert/finbert_news_20tickers_')
+        news_key = (get_latest_s3_key(s3, 'finbert/finbert_news_100tickers_')
+                    or get_latest_s3_key(s3, 'finbert/finbert_news_20tickers_'))
         if news_key:
             try:
                 stored = select_eligible_news(read_s3_dataframe(s3, news_key), pd.Timestamp.now(tz='UTC'))

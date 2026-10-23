@@ -120,10 +120,15 @@ def _complete_observed_model_features(frame, ticker, model_type, feature_cols):
         cached = _FEATURE_PANEL_CACHE.get(model_type)
         if cached is None or time.time() - cached['loaded_at'] >= MODEL_CACHE_TTL:
             s3 = get_s3_client()
-            prefix = f'{model_type}/{model_type}_stock_20tickers_5y_'
+            prefix = f'{model_type}/{model_type}_stock_100tickers_5y_'
             keys = [item['Key'] for page in s3.get_paginator('list_objects_v2').paginate(
                 Bucket=BUCKET_NAME, Prefix=prefix) for item in page.get('Contents', [])
                 if item['Key'].endswith('.csv')]
+            if not keys:
+                prefix = f'{model_type}/{model_type}_stock_20tickers_5y_'
+                keys = [item['Key'] for page in s3.get_paginator('list_objects_v2').paginate(
+                    Bucket=BUCKET_NAME, Prefix=prefix) for item in page.get('Contents', [])
+                    if item['Key'].endswith('.csv')]
             if not keys:
                 prefix = f'{model_type}/{model_type}_stock_20tickers_10y_'
                 keys = [item['Key'] for page in s3.get_paginator('list_objects_v2').paginate(

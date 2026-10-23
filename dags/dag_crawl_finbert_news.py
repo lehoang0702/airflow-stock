@@ -1,7 +1,7 @@
 """
-DAG: CÀO TIN TỨC TÀI CHÍNH ĐA NGUỒN CHO 20 MÃ CỔ PHIẾU
+DAG: CÀO TIN TỨC TÀI CHÍNH ĐA NGUỒN CHO 100 MÃ CỔ PHIẾU
 (Hỗ trợ Yahoo Finance API mới + Tự động Fallback Google News RSS)
-Lưu file vào MinIO: stock-data/finbert/finbert_news_20tickers_YYYYMMDD.csv
+Lưu file vào MinIO: stock-data/finbert/finbert_news_100tickers_YYYYMMDD.csv
 """
 from datetime import datetime, timedelta, timezone
 import io
@@ -57,7 +57,7 @@ def crawl_news_task(**context):
     stamp = datetime.now(timezone.utc)
     date_nodash = stamp.strftime("%Y%m%d")
     df_news = pd.concat(batches, ignore_index=True) if batches else pd.DataFrame(columns=NEWS_COLUMNS)
-    minio_key = f"finbert/finbert_news_20tickers_{date_nodash}.csv"
+    minio_key = f"finbert/finbert_news_100tickers_{date_nodash}.csv"
     csv_text = df_news.to_csv(index=False)
     s3_hook = S3Hook(aws_conn_id=MINIO_CONN_ID)
     archive_key = f"news_history/{stamp.strftime('%Y%m%dT%H%M%S%f')}_{uuid4().hex}.csv"
@@ -119,7 +119,7 @@ DAG đảm nhiệm tầng **News Ingestion** đa nguồn cho mô hình phân tí
 - **Cơ chế tải kép (Dual-Source Fallback):**
   1. *Nguồn 1:* Yahoo Finance RSS (Trích xuất các tin tức tài chính chính thống mới nhất trong 72h).
   2. *Nguồn 2:* Tự động kích hoạt Google News RSS Fallback nếu Yahoo Finance bị chặn hoặc không trả về bài viết.
-- Quét qua **20 mã cổ phiếu lớn**, phân bổ theo ngành và chuẩn hóa cấu trúc dữ liệu.
+- Quét qua **100 mã cổ phiếu lớn**, phân bổ theo ngành và chuẩn hóa cấu trúc dữ liệu.
 
 ### 2. Định Dạng Dữ Liệu Thu Thập
 Mỗi phiên bản bài báo lưu `published_at`, `first_seen_at`, `available_at`,
@@ -129,7 +129,7 @@ thời gian hợp lệ mới được dùng cho mô hình. Mọi lần thu thậ
 trong `news_history/`; file ngày là bản xem mới nhất.
 
 ### 3. Đầu Ra MinIO
-- **Artifact:** `stock-data/finbert/finbert_news_20tickers_YYYYMMDD.csv`
+- **Artifact:** `stock-data/finbert/finbert_news_100tickers_YYYYMMDD.csv`
 """
 
     crawl_news = PythonOperator(

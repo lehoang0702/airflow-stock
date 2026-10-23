@@ -192,7 +192,7 @@ def crawl_process_and_upload_to_minio(**kwargs):
     clean_df_final.drop(columns=[c for c in columns_to_drop if c in clean_df_final.columns], inplace=True)
 
     today_str = datetime.now().strftime('%Y%m%d')
-    file_name = f"xgboost/xgboost_stock_20tickers_5y_{today_str}.csv"
+    file_name = f"xgboost/xgboost_stock_100tickers_5y_{today_str}.csv"
 
     print(f"\n=== ĐANG XUẤT 1 FILE CSV DUY NHẤT LÊN MINIO ===")
     print(f"-> Tên file: {file_name}")
@@ -267,7 +267,7 @@ DAG này phụ trách tầng **Data Ingestion & Feature Engineering** cho nhánh
 | **Kinh Tế Vĩ Mô (Macro)** | Lợi suất TPCP Mỹ 10Y (^TNX), Chỉ số sợ hãi (^VIX), Tương quan SPY & QQQ |
 
 ### 3. Đầu Ra MinIO
-- **Artifact:** `stock-data/xgboost/xgboost_stock_20tickers_5y_YYYYMMDD.csv`
+- **Artifact:** `stock-data/xgboost/xgboost_stock_100tickers_5y_YYYYMMDD.csv`
 """
 
     crawl_task = PythonOperator(

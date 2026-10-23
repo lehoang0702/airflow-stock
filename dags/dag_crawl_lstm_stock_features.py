@@ -1,7 +1,7 @@
 """
 DAG: CÀO DỮ LIỆU & TÍNH FEATURES CHUỖI THỜI GIAN CHO LSTM
 (Khắc phục lỗi lệch ngày 2026, tải an toàn ^VIX, ^TNX, SPY, QQQ)
-Lưu file vào MinIO: stock-data/lstm/lstm_stock_20tickers_5y_YYYYMMDD.csv
+Lưu file vào MinIO: stock-data/lstm/lstm_stock_100tickers_5y_YYYYMMDD.csv
 """
 from datetime import datetime, timedelta
 import io
@@ -17,10 +17,12 @@ MINIO_CONN_ID = 'minio_conn'
 BUCKET_NAME = 'stock-data'
 
 try:
-    from config_shared import TICKERS_LIST as TICKERS_20, MACRO_TICKERS as MACRO_DICT, SECTOR_MAP, DATASET_HISTORY_PERIOD
+    from config_shared import TICKERS_LIST as TICKERS_100, MACRO_TICKERS as MACRO_DICT, SECTOR_MAP, DATASET_HISTORY_PERIOD
+    TICKERS_20 = TICKERS_100  # Backward-compatible alias
     MACRO_TICKERS = list(MACRO_DICT.keys())
 except ImportError:
-    from dags.config_shared import TICKERS_LIST as TICKERS_20, MACRO_TICKERS as MACRO_DICT, SECTOR_MAP, DATASET_HISTORY_PERIOD
+    from dags.config_shared import TICKERS_LIST as TICKERS_100, MACRO_TICKERS as MACRO_DICT, SECTOR_MAP, DATASET_HISTORY_PERIOD
+    TICKERS_20 = TICKERS_100
     MACRO_TICKERS = list(MACRO_DICT.keys())
 
 try:
@@ -137,8 +139,14 @@ def crawl_and_extract_lstm_features(**context):
     from pipeline_storage import load_backup_rows, require_complete_panel
     if failed_tickers:
         backups = load_backup_rows(
-            s3_hook, BUCKET_NAME, 'lstm/lstm_stock_20tickers_5y_', 'Ticker',
+            s3_hook, BUCKET_NAME, 'lstm/lstm_stock_100tickers_5y_', 'Ticker',
             failed_tickers, ['Date', 'Open', 'High', 'Low', 'Close', 'Volume'], date_nodash)
+        if len(backups) < len(failed_tickers):
+            still_failed = [t for t in failed_tickers if t not in backups]
+            b20 = load_backup_rows(
+                s3_hook, BUCKET_NAME, 'lstm/lstm_stock_20tickers_5y_', 'Ticker',
+                still_failed, ['Date', 'Open', 'High', 'Low', 'Close', 'Volume'], date_nodash)
+            backups.update(b20)
         if len(backups) < len(failed_tickers):
             still_failed = [t for t in failed_tickers if t not in backups]
             b10 = load_backup_rows(
@@ -172,7 +180,7 @@ def crawl_and_extract_lstm_features(**context):
     future = df_final.groupby('Ticker')['Close'].shift(-1)
     df_final['Target'] = direction_target(df_final['Close'], future)
 
-    # Chốt chặn an toàn (Quality Gate Guardrail): Bắt buộc đủ 20 mã mới được ghi đè MinIO
+    # Chốt chặn an toàn (Quality Gate Guardrail): Bắt buộc đủ mã mới được ghi đè MinIO
     unique_tickers = df_final['Ticker'].nunique()
     if unique_tickers < len(TICKERS_20):
         missing = set(TICKERS_20) - set(df_final['Ticker'].unique())
@@ -181,7 +189,7 @@ def crawl_and_extract_lstm_features(**context):
     # 3. Ghi lên MinIO
     csv_buffer = io.StringIO()
     df_final.to_csv(csv_buffer, index=False, encoding='utf-8-sig')
-    minio_key = f"lstm/lstm_stock_20tickers_5y_{date_nodash}.csv"
+    minio_key = f"lstm/lstm_stock_100tickers_5y_{date_nodash}.csv"
 
     s3_hook.load_string(
         string_data=csv_buffer.getvalue(),
@@ -222,7 +230,7 @@ with DAG(
 ---
 ### 1. Mục Đích & Vai Trò
 Phụ trách chuẩn bị tập dữ liệu chuỗi thời gian nến (OHLCV) và các đặc trưng động lượng (Momentum Sequences) cho mạng nơ-ron **LSTM (Long Short-Term Memory)**:
-- Thu thập dữ liệu giá nến đầy đủ: `Open`, `High`, `Low`, `Close`, `Volume` cho **20 mã cổ phiếu**.
+- Thu thập dữ liệu giá nến đầy đủ: `Open`, `High`, `Low`, `Close`, `Volume` cho **100 mã cổ phiếu**.
 - Tích hợp 4 biến số vĩ mô: `SPY`, `QQQ`, `^VIX`, `^TNX`.
 - Giữ nguyên cột giá gốc `Close` để phục vụ trực quan hóa biểu đồ và kiểm định thực tế sau này.
 
@@ -233,7 +241,7 @@ Phụ trách chuẩn bị tập dữ liệu chuỗi thời gian nến (OHLCV) v�
 - **Khối Lượng & Chu kỳ:** Khối lượng chuẩn hóa log, chỉ số dao động RSI, vị thế dải Bollinger.
 
 ### 3. Đầu Ra MinIO
-- **Artifact:** `stock-data/lstm/lstm_stock_20tickers_5y_YYYYMMDD.csv`
+- **Artifact:** `stock-data/lstm/lstm_stock_100tickers_5y_YYYYMMDD.csv`
 """
 
     crawl_task = PythonOperator(

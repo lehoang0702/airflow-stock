@@ -51,7 +51,8 @@ def predict_finbert_task(**context):
     stamp = datetime.now(timezone.utc)
     date_nodash = stamp.strftime('%Y%m%d')
     today_str = stamp.strftime('%Y-%m-%d')
-    keys = s3_hook.list_keys(bucket_name=BUCKET_NAME, prefix='finbert/finbert_news_20tickers_') or []
+    keys = (s3_hook.list_keys(bucket_name=BUCKET_NAME, prefix='finbert/finbert_news_100tickers_')
+            or s3_hook.list_keys(bucket_name=BUCKET_NAME, prefix='finbert/finbert_news_20tickers_') or [])
     if not keys:
         raise ValueError('Không có dữ liệu tin tức để chạy FinBERT.')
     # CSV is the daily primary view; parquet can be stale after a failed upload.
