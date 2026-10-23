@@ -25,17 +25,17 @@ class TestConfigIntegrity(unittest.TestCase):
     """Kiểm thử tính toàn vẹn và nhất quán của toàn bộ cấu hình hệ thống (Pure Python)."""
 
     def test_tickers_count(self):
-        """Xác nhận danh mục phải có đúng 20 mã cổ phiếu Blue-chip S&P 500."""
-        self.assertEqual(len(TICKERS_LIST), 20)
-        self.assertEqual(len(SECTOR_MAP), 20)
-        self.assertEqual(len(TICKERS_META), 20)
+        """Xác nhận danh mục phải có đúng 100 mã cổ phiếu lớn nhất S&P theo vốn hóa."""
+        self.assertEqual(len(TICKERS_LIST), 100)
+        self.assertEqual(len(SECTOR_MAP), 100)
+        self.assertEqual(len(TICKERS_META), 100)
 
     def test_sectors_mapping(self):
         """Xác nhận các nhóm ngành GICS chuẩn quốc tế được gán đầy đủ."""
         valid_sectors = {
             'Technology', 'Consumer Discretionary', 'Consumer Staples',
             'Financials', 'Healthcare', 'Industrials', 'Energy',
-            'Utilities', 'Materials'
+            'Utilities', 'Materials', 'Communication Services', 'Real Estate'
         }
         assigned_sectors = set(SECTOR_MAP.values())
         self.assertTrue(assigned_sectors.issubset(valid_sectors))

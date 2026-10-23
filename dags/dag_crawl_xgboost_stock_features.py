@@ -10,9 +10,9 @@ from airflow.operators.python import PythonOperator
 from airflow.providers.amazon.aws.hooks.s3 import S3Hook
 
 try:
-    from config_shared import SECTOR_MAP, TICKERS_META, MACRO_TICKERS
+    from config_shared import SECTOR_MAP, TICKERS_META, MACRO_TICKERS, DATASET_HISTORY_PERIOD
 except ImportError:
-    from dags.config_shared import SECTOR_MAP, TICKERS_META, MACRO_TICKERS
+    from dags.config_shared import SECTOR_MAP, TICKERS_META, MACRO_TICKERS, DATASET_HISTORY_PERIOD
 
 TICKERS = {
     k: {'name': TICKERS_META.get(k, {}).get('name', k), 'sector': SECTOR_MAP.get(k, 'Unknown')}
@@ -55,7 +55,7 @@ def crawl_process_and_upload_to_minio(**kwargs):
     s3_hook = S3Hook(aws_conn_id=MINIO_CONN_ID)
     if not s3_hook.check_for_bucket(MINIO_BUCKET):
         s3_hook.create_bucket(MINIO_BUCKET)
-    def fetch_stock_raw(ticker, period="15y", retries=3):
+    def fetch_stock_raw(ticker, period=DATASET_HISTORY_PERIOD, retries=3):
         for attempt in range(1, retries + 1):
             try:
                 t = yf.Ticker(ticker)
@@ -95,10 +95,10 @@ def crawl_process_and_upload_to_minio(**kwargs):
                 'fund_beta': 1.0, 'fund_market_cap_log': 0.0
             }
 
-    print("=== 1. TẢI VÀ XỬ LÝ DỮ LIỆU MACRO & LIÊN THỊ TRƯỜNG (15Y) ===")
+    print("=== 1. TẢI VÀ XỬ LÝ DỮ LIỆU MACRO & LIÊN THỊ TRƯỜNG (5Y) ===")
     macro_dfs = {}
     for ticker, prefix in MACRO_TICKERS.items():
-        raw = fetch_stock_raw(ticker, period="15y")
+        raw = fetch_stock_raw(ticker, period=DATASET_HISTORY_PERIOD)
         if raw.empty:
             continue
         cdf = clean_df(raw)
@@ -115,12 +115,12 @@ def crawl_process_and_upload_to_minio(**kwargs):
 
     all_dfs = []
     failed_tickers = []
-    print("=== 2. TÍNH TOÁN ĐẶC TRƯNG CHO 20 MÃ (15Y + CHỈ SỐ CƠ BẢN) ===")
+    print("=== 2. TÍNH TOÁN ĐẶC TRƯNG CHO 20 MÃ (5Y + CHỈ SỐ CƠ BẢN) ===")
     for ticker, info in TICKERS.items():
         name = info['name']
         sector = info['sector']
         print(f"-> [{sector}] {ticker} ({name})...")
-        df_raw = fetch_stock_raw(ticker, period="15y")
+        df_raw = fetch_stock_raw(ticker, period=DATASET_HISTORY_PERIOD)
         if df_raw.empty:
             print(f"⚠️ Cảnh báo: {ticker} không có dữ liệu từ Yahoo.")
             failed_tickers.append(ticker)
@@ -130,21 +130,9 @@ def crawl_process_and_upload_to_minio(**kwargs):
         df_processed = calculate_technical_indicators(df_stock, df_macro, symbol=ticker, sector=sector, fundamentals=fund_dict)
         all_dfs.append(df_processed)
 
-    # Recover raw OHLCV, then rebuild all features with the current macro schema.
-    from pipeline_storage import load_backup_rows, require_complete_panel
+    from pipeline_storage import require_complete_panel
     if failed_tickers:
-        backups = load_backup_rows(
-            s3_hook, MINIO_BUCKET, 'raw-data/xgboost/stock_prices_', 'symbol',
-            failed_tickers, ['date', 'open', 'high', 'low', 'close', 'volume'],
-            datetime.now().strftime('%Y%m%d'), exclude_today=False)
-        for ticker, raw in backups.items():
-            raw['date'] = pd.to_datetime(raw['date']).dt.tz_localize(None)
-            if {'open', 'high', 'low', 'close'}.issubset(raw.columns):
-                raw['high'] = raw[['high', 'open', 'close']].max(axis=1)
-                raw['low'] = raw[['low', 'open', 'close']].min(axis=1)
-            all_dfs.append(calculate_technical_indicators(
-                raw.sort_values('date').reset_index(drop=True), df_macro, ticker,
-                TICKERS[ticker]['sector'], fetch_stock_fundamentals(ticker)))
+        print(f"⚠️ Cảnh báo: Các mã tải thất bại từ Yahoo Finance: {failed_tickers}")
 
     if not all_dfs:
         raise ValueError("❌ Không tải được dữ liệu cho bất kỳ mã nào! Hủy quá trình để không ghi đè file rỗng lên MinIO.")
@@ -210,13 +198,6 @@ def crawl_process_and_upload_to_minio(**kwargs):
     print(f"-> Tên file: {file_name}")
     print(f"-> Tổng số dòng: {len(clean_df_final):,} dòng | Tổng số cột: {clean_df_final.shape[1]} cột")
 
-    # Publish a validated raw archive for subsequent recoveries.
-    from pipeline_storage import new_model_version
-    raw_columns = ['date', 'symbol', 'open', 'high', 'low', 'close', 'volume']
-    s3_hook.load_string(string_data=combined_df[raw_columns].to_csv(index=False),
-                        key=f'raw-data/xgboost/stock_prices_{new_model_version()[1:]}.csv',
-                        bucket_name=MINIO_BUCKET, replace=False)
-
     # Đẩy 1 file CSV duy nhất lên MinIO
     csv_buf = io.StringIO()
     clean_df_final.to_csv(csv_buf, index=False)
@@ -256,7 +237,7 @@ default_args = {
     'start_date': datetime(2024, 1, 1),
     'retries': 1,
     'on_failure_callback': telegram_failure_callback,
-    'execution_timeout': timedelta(minutes=25),
+    'execution_timeout': timedelta(minutes=45),
 }
 
 with DAG(

@@ -32,7 +32,7 @@ default_args = {
     'retries': 1,
     'retry_delay': timedelta(minutes=5),
     'on_failure_callback': telegram_failure_callback,
-    'execution_timeout': timedelta(minutes=20),
+    'execution_timeout': timedelta(minutes=45),
 }
 
 from news_sources import fetch_yahoo_news, fetch_rss_news, collect_ticker_news

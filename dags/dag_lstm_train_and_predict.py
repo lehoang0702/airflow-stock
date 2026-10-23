@@ -40,7 +40,7 @@ default_args = {
     'depends_on_past': False,
     'start_date': datetime(2024, 1, 1),
     'retries': 0,
-    'execution_timeout': timedelta(minutes=35),
+    'execution_timeout': timedelta(minutes=60),
     'on_failure_callback': telegram_failure_callback,
 }
 

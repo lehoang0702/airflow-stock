@@ -27,7 +27,7 @@ def article_mentions_ticker(text, ticker):
     """
     from config_shared import TICKERS_META
     company = TICKERS_META.get(ticker, {}).get('name', '')
-    company = re.sub(r'\s+(Inc\.|Corp\.|Co\.|plc)$', '', company).strip()
+    company = re.sub(r'[\s,]+(Inc\.|Corp\.|Co\.|plc|Corporation|Company)$', '', company).strip()
     aliases = [company] if company else []
     aliases += {'GOOGL': ['Google'], 'AMZN': ['Amazon'], 'XOM': ['Exxon'],
                 'JPM': ['JPMorgan'], 'UNH': ['UnitedHealth']}.get(ticker, [])

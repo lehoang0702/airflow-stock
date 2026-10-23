@@ -17,10 +17,10 @@ MINIO_CONN_ID = 'minio_conn'
 BUCKET_NAME = 'stock-data'
 
 try:
-    from config_shared import TICKERS_LIST as TICKERS_20, MACRO_TICKERS as MACRO_DICT, SECTOR_MAP
+    from config_shared import TICKERS_LIST as TICKERS_20, MACRO_TICKERS as MACRO_DICT, SECTOR_MAP, DATASET_HISTORY_PERIOD
     MACRO_TICKERS = list(MACRO_DICT.keys())
 except ImportError:
-    from dags.config_shared import TICKERS_LIST as TICKERS_20, MACRO_TICKERS as MACRO_DICT, SECTOR_MAP
+    from dags.config_shared import TICKERS_LIST as TICKERS_20, MACRO_TICKERS as MACRO_DICT, SECTOR_MAP, DATASET_HISTORY_PERIOD
     MACRO_TICKERS = list(MACRO_DICT.keys())
 
 try:
@@ -35,7 +35,7 @@ default_args = {
     'retries': 1,
     'retry_delay': timedelta(minutes=3),
     'on_failure_callback': telegram_failure_callback,
-    'execution_timeout': timedelta(minutes=25),
+    'execution_timeout': timedelta(minutes=45),
 }
 
 from feature_engineering import calculate_technical_features
@@ -46,7 +46,7 @@ def crawl_and_extract_lstm_features(**context):
     date_nodash = datetime.now().strftime("%Y%m%d")
     logging.info("🚀 Bắt đầu cào dữ liệu vĩ mô và 20 mã cổ phiếu (Robust Dual-Engine)...")
 
-    def fetch_stock_raw(ticker, period="15y", retries=3):
+    def fetch_stock_raw(ticker, period=DATASET_HISTORY_PERIOD, retries=3):
         for attempt in range(1, retries + 1):
             try:
                 t_obj = yf.Ticker(ticker)
@@ -67,11 +67,11 @@ def crawl_and_extract_lstm_features(**context):
                 time.sleep(2 * attempt)
         return pd.DataFrame()
 
-    # 1. CÀO DỮ LIỆU VĨ MÔ AN TOÀN (Dùng period="15y")
+    # 1. CÀO DỮ LIỆU VĨ MÔ AN TOÀN (Dùng period=DATASET_HISTORY_PERIOD)
     macro_dfs = {}
     for m_ticker in MACRO_TICKERS:
         try:
-            hist = fetch_stock_raw(m_ticker, period="15y")
+            hist = fetch_stock_raw(m_ticker, period=DATASET_HISTORY_PERIOD)
             if not hist.empty:
                 hist = hist.reset_index()
                 hist['Date'] = pd.to_datetime(hist['Date']).dt.tz_localize(None).dt.normalize()
@@ -101,7 +101,7 @@ def crawl_and_extract_lstm_features(**context):
     failed_tickers = []
     for ticker in TICKERS_20:
         try:
-            hist = fetch_stock_raw(ticker, period="15y")
+            hist = fetch_stock_raw(ticker, period=DATASET_HISTORY_PERIOD)
 
             if hist.empty or len(hist) < 50:
                 logging.warning(f"⚠️ Dữ liệu {ticker} quá ngắn hoặc rỗng từ Yahoo.")

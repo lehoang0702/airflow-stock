@@ -23,8 +23,9 @@ _CHART_CACHE = {}
 
 def generate_live_chart_image(ticker: str, model: str = "ensemble"):
     """
-    Hiển thị lịch sử giá quan sát được và xác suất từ mô hình đã huấn luyện.
-    Không dựng đường giá tương lai khi chưa có mô hình dự báo tương ứng.
+    Tạo biểu đồ khung kép (Dual-Panel):
+    - Panel 1: Toàn cảnh lịch sử giá quan sát được.
+    - Panel 2: Cận cảnh dự báo 1 tuần (T+1 đến T+5) từ giá hiện tại.
     """
     from dashboard.services import get_ticker_chart
 
@@ -40,7 +41,7 @@ def generate_live_chart_image(ticker: str, model: str = "ensemble"):
             model = 'ensemble'
 
         pred_data = _ON_DEMAND_PREDICTIONS.get(ticker)
-        if not pred_data and model == 'finbert':
+        if not pred_data:
             from dashboard.services import get_market_data
             pred_data = next((row for row in get_market_data().get('predictions', []) if row['ticker'] == ticker), None)
         if not pred_data:
@@ -184,6 +185,9 @@ def get_chart_image(ticker: str, model: str = "ensemble"):
     cache_key = f"{ticker}_{model}"
     field = {'xgboost': 'prob_xgb', 'lstm': 'prob_lstm'}.get(model.lower())
     pred = _ON_DEMAND_PREDICTIONS.get(ticker)
+    if not pred:
+        from dashboard.services import get_market_data
+        pred = next((row for row in get_market_data().get('predictions', []) if row['ticker'] == ticker), None)
     if pred and field and pred.get(field) is None:
         return None
     now_ts = time.time()
@@ -191,8 +195,7 @@ def get_chart_image(ticker: str, model: str = "ensemble"):
     if cached and (now_ts - cached['time']) < 300:
         return cached['data']
 
-    # Older stored PNGs contain heuristic price paths. Render from validated
-    # current inference instead of showing those legacy images.
+    # Tạo ảnh biểu đồ live khung kép kèm cận cảnh dự báo 1 tuần
     img_data = generate_live_chart_image(ticker, model)
 
     if img_data:

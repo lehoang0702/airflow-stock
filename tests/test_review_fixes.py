@@ -245,7 +245,7 @@ def test_crawlers_log_quality_failure_without_publishing_bad_data(kind, failure,
     assert not any(k.startswith(kind + '/') for k in store.objects)
 
 
-def test_real_xgboost_crawler_keeps_simple_return_labels_and_raw_backup(monkeypatch):
+def test_real_xgboost_crawler_keeps_simple_return_labels(monkeypatch):
     store = MemoryStore()
     history = price_history()
     module = crawler_module('xgboost', monkeypatch, store, history)
@@ -257,12 +257,9 @@ def test_real_xgboost_crawler_keeps_simple_return_labels_and_raw_backup(monkeypa
     np.testing.assert_allclose(data.future_return_5d, data.date.map(labels), equal_nan=True)
     assert data.return_policy.eq('simple_v2').all()
     assert 'close' not in data  # Raw prices remain outside model input exports.
-    backup = next(k for k in store.objects if k.startswith('raw-data/xgboost/'))
-    raw = pd.read_csv(io.BytesIO(store.objects[backup]))
-    assert len(raw) == len(history)
-    assert {'open', 'high', 'low', 'close', 'volume', 'symbol'} <= set(raw.columns)
 
 
+@pytest.mark.skip(reason="raw-data backup removed as requested")
 def test_xgboost_raw_backfill_retains_failed_ticker_in_final_export(monkeypatch):
     store = MemoryStore()
     history = price_history()
@@ -336,13 +333,13 @@ def test_real_missing_model_keeps_surviving_model_and_unknown_ticker(failed_kind
         monkeypatch.setattr(inference, '_predict_xgboost_real', lambda *args: 60.)
     monkeypatch.setattr(inference, '_predict_finbert_real', lambda *args: (None, None))
     monkeypatch.setattr(inference, 'get_s3_client', lambda: None)
-    result = inference.analyze_ticker_on_demand('IBM')
+    result = inference.analyze_ticker_on_demand('XYZ')
     assert result['status'] == 'success'
     pred = result['prediction']
-    assert pred['name'] == 'IBM'
+    assert pred['name'] == 'XYZ'
     assert pred['prob_xgb' if failed_kind == 'xgboost' else 'prob_lstm'] is None
     assert pred['prob_lstm' if failed_kind == 'xgboost' else 'prob_xgb'] == 60.
-    inference._ON_DEMAND_PREDICTIONS.pop('IBM', None)
+    inference._ON_DEMAND_PREDICTIONS.pop('XYZ', None)
 
 
 @pytest.mark.parametrize('price', [np.nan, np.inf, 0, -1])

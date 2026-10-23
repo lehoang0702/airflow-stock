@@ -30,7 +30,7 @@ default_args = {
     'retries': 1,
     'retry_delay': timedelta(minutes=5),
     'on_failure_callback': telegram_failure_callback,
-    'execution_timeout': timedelta(minutes=15),
+    'execution_timeout': timedelta(minutes=25),
 }
 
 try:

@@ -35,7 +35,7 @@ default_args = {
     'retries': 1,
     'retry_delay': timedelta(minutes=2),
     'on_failure_callback': telegram_failure_callback,
-    'execution_timeout': timedelta(minutes=30),
+    'execution_timeout': timedelta(minutes=60),
 }
 
 def predict_finbert_task(**context):
