@@ -260,8 +260,12 @@ def summarize(predictions, folds):
 def read_snapshot(s3, kind, key=None):
     if key is None:
         keys = [o['Key'] for page in s3.get_paginator('list_objects_v2').paginate(
-            Bucket='stock-data', Prefix=f'{kind}/{kind}_stock_20tickers_10y_')
+            Bucket='stock-data', Prefix=f'{kind}/{kind}_stock_20tickers_5y_')
             for o in page.get('Contents', []) if o['Key'].endswith('.csv')]
+        if not keys:
+            keys = [o['Key'] for page in s3.get_paginator('list_objects_v2').paginate(
+                Bucket='stock-data', Prefix=f'{kind}/{kind}_stock_20tickers_10y_')
+                for o in page.get('Contents', []) if o['Key'].endswith('.csv')]
         if not keys:
             raise ValueError(f'No {kind} snapshots')
         key = sorted(keys)[-1]

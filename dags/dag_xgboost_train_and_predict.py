@@ -64,7 +64,9 @@ def train_and_predict_xgboost_task(**context):
     today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
     # 1. Đọc dataset MinIO (Tự động lọc file hợp lệ > 100 dòng)
-    keys = s3_hook.list_keys(bucket_name=BUCKET_NAME, prefix="xgboost/xgboost_stock_20tickers_10y_")
+    keys = s3_hook.list_keys(bucket_name=BUCKET_NAME, prefix="xgboost/xgboost_stock_20tickers_5y_")
+    if not keys:
+        keys = s3_hook.list_keys(bucket_name=BUCKET_NAME, prefix="xgboost/xgboost_stock_20tickers_10y_")
     if not keys:
         raise FileNotFoundError("❌ Không tìm thấy dataset trên MinIO xgboost/")
 

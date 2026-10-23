@@ -1,7 +1,7 @@
 """
 DAG: CÀO DỮ LIỆU & TÍNH FEATURES CHUỖI THỜI GIAN CHO LSTM
 (Khắc phục lỗi lệch ngày 2026, tải an toàn ^VIX, ^TNX, SPY, QQQ)
-Lưu file vào MinIO: stock-data/lstm/lstm_stock_20tickers_10y_YYYYMMDD.csv
+Lưu file vào MinIO: stock-data/lstm/lstm_stock_20tickers_5y_YYYYMMDD.csv
 """
 from datetime import datetime, timedelta
 import io
@@ -137,8 +137,14 @@ def crawl_and_extract_lstm_features(**context):
     from pipeline_storage import load_backup_rows, require_complete_panel
     if failed_tickers:
         backups = load_backup_rows(
-            s3_hook, BUCKET_NAME, 'lstm/lstm_stock_20tickers_10y_', 'Ticker',
+            s3_hook, BUCKET_NAME, 'lstm/lstm_stock_20tickers_5y_', 'Ticker',
             failed_tickers, ['Date', 'Open', 'High', 'Low', 'Close', 'Volume'], date_nodash)
+        if len(backups) < len(failed_tickers):
+            still_failed = [t for t in failed_tickers if t not in backups]
+            b10 = load_backup_rows(
+                s3_hook, BUCKET_NAME, 'lstm/lstm_stock_20tickers_10y_', 'Ticker',
+                still_failed, ['Date', 'Open', 'High', 'Low', 'Close', 'Volume'], date_nodash)
+            backups.update(b10)
         for b_df in backups.values():
             if all(c in b_df.columns for c in ['Open', 'High', 'Low', 'Close']):
                 b_df['High'] = b_df[['High', 'Open', 'Close']].max(axis=1)
@@ -175,7 +181,7 @@ def crawl_and_extract_lstm_features(**context):
     # 3. Ghi lên MinIO
     csv_buffer = io.StringIO()
     df_final.to_csv(csv_buffer, index=False, encoding='utf-8-sig')
-    minio_key = f"lstm/lstm_stock_20tickers_10y_{date_nodash}.csv"
+    minio_key = f"lstm/lstm_stock_20tickers_5y_{date_nodash}.csv"
 
     s3_hook.load_string(
         string_data=csv_buffer.getvalue(),
@@ -227,7 +233,7 @@ Phụ trách chuẩn bị tập dữ liệu chuỗi thời gian nến (OHLCV) v�
 - **Khối Lượng & Chu kỳ:** Khối lượng chuẩn hóa log, chỉ số dao động RSI, vị thế dải Bollinger.
 
 ### 3. Đầu Ra MinIO
-- **Artifact:** `stock-data/lstm/lstm_stock_20tickers_10y_YYYYMMDD.csv`
+- **Artifact:** `stock-data/lstm/lstm_stock_20tickers_5y_YYYYMMDD.csv`
 """
 
     crawl_task = PythonOperator(

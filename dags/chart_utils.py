@@ -691,7 +691,7 @@ def save_charts_zip_minio_and_telegram(
     logging.info(f"✅ Đã gửi ZIP {len(chart_files)} chart qua Telegram")
 
 
-def load_price_data_from_minio(s3_hook, bucket_name, prefix="lstm/lstm_stock_20tickers_10y_"):
+def load_price_data_from_minio(s3_hook, bucket_name, prefix="lstm/lstm_stock_20tickers_5y_"):
     """
     Đọc dữ liệu giá lịch sử từ MinIO dataset LSTM (có cột Close thực).
     Fallback: thử XGBoost dataset nếu LSTM không có.
@@ -703,10 +703,14 @@ def load_price_data_from_minio(s3_hook, bucket_name, prefix="lstm/lstm_stock_20t
         'CVX', 'PG', 'KO', 'WMT', 'MCD', 'NKE', 'CAT', 'BA', 'NEE', 'LIN'
     ]
     keys = s3_hook.list_keys(bucket_name=bucket_name, prefix=prefix)
+    if not keys and "5y" in prefix:
+        keys = s3_hook.list_keys(bucket_name=bucket_name, prefix=prefix.replace("5y", "10y"))
 
     if not keys and "lstm" in prefix:
         logging.warning(f"⚠️ Không tìm thấy LSTM dataset, thử XGBoost dataset...")
-        keys = s3_hook.list_keys(bucket_name=bucket_name, prefix="xgboost/xgboost_stock_20tickers_10y_")
+        keys = s3_hook.list_keys(bucket_name=bucket_name, prefix="xgboost/xgboost_stock_20tickers_5y_")
+        if not keys:
+            keys = s3_hook.list_keys(bucket_name=bucket_name, prefix="xgboost/xgboost_stock_20tickers_10y_")
 
     if not keys:
         logging.warning(f"⚠️ Không tìm thấy dataset giá nào trên MinIO")

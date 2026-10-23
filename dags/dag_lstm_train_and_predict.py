@@ -95,7 +95,9 @@ def train_and_predict_lstm_task(**context):
     date_nodash = datetime.now(timezone.utc).strftime("%Y%m%d")
     today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
-    keys = s3_hook.list_keys(bucket_name=BUCKET_NAME, prefix="lstm/lstm_stock_20tickers_10y_")
+    keys = s3_hook.list_keys(bucket_name=BUCKET_NAME, prefix="lstm/lstm_stock_20tickers_5y_")
+    if not keys:
+        keys = s3_hook.list_keys(bucket_name=BUCKET_NAME, prefix="lstm/lstm_stock_20tickers_10y_")
     if not keys:
         raise FileNotFoundError("❌ Không tìm thấy dataset trên MinIO lstm/")
 

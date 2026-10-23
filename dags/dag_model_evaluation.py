@@ -125,7 +125,9 @@ def evaluate_xgboost_task(**context):
         df = _load_valid_dataset(s3_hook, "xgboost/", dataset_key=builder.model_card.hyperparameters['dataset_key'],
                                  expected_sha256=builder.model_card.hyperparameters.get('dataset_sha256'))
     else:
-        df = _load_valid_dataset(s3_hook, "xgboost/xgboost_stock_20tickers_10y_")
+        df = _load_valid_dataset(s3_hook, "xgboost/xgboost_stock_20tickers_5y_")
+        if df is None:
+            df = _load_valid_dataset(s3_hook, "xgboost/xgboost_stock_20tickers_10y_")
     if df is None:
         raise ValueError("❌ Không tìm thấy dataset XGBoost hợp lệ!")
 
@@ -230,7 +232,9 @@ def evaluate_lstm_task(**context):
         df = _load_valid_dataset(s3_hook, "lstm/", dataset_key=builder.model_card.hyperparameters['dataset_key'],
                                  expected_sha256=builder.model_card.hyperparameters.get('dataset_sha256'))
     else:
-        df = _load_valid_dataset(s3_hook, "lstm/lstm_stock_20tickers_10y_")
+        df = _load_valid_dataset(s3_hook, "lstm/lstm_stock_20tickers_5y_")
+        if df is None:
+            df = _load_valid_dataset(s3_hook, "lstm/lstm_stock_20tickers_10y_")
     if df is None:
         raise ValueError("❌ Không tìm thấy dataset LSTM hợp lệ!")
 
