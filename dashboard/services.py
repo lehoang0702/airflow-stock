@@ -75,6 +75,7 @@ def get_market_data():
 
     latest_prices = {}
     price_key = (get_latest_s3_key(s3, "lstm/lstm_stock_100tickers_5y_")
+                 or get_latest_s3_key(s3, "xgboost/xgboost_stock_100tickers_5y_")
                  or get_latest_s3_key(s3, "lstm/lstm_stock_20tickers_5y_")
                  or get_latest_s3_key(s3, "lstm/lstm_stock_20tickers_10y_"))
     if price_key:
@@ -220,6 +221,7 @@ def get_ticker_chart(ticker: str):
 
     if s3:
         price_key = (get_latest_s3_key(s3, "lstm/lstm_stock_100tickers_5y_")
+                     or get_latest_s3_key(s3, "xgboost/xgboost_stock_100tickers_5y_")
                      or get_latest_s3_key(s3, "lstm/lstm_stock_20tickers_5y_")
                      or get_latest_s3_key(s3, "lstm/lstm_stock_20tickers_10y_"))
         if price_key:

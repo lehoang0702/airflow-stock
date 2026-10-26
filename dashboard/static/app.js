@@ -1,23 +1,26 @@
 /**
  * QUANTUM MULTI-MODAL DASHBOARD - CLIENT APP LOGIC (v6.0)
  * =========================================================
- * Smart Market Screener (20 Stocks Table), Interactive Candlestick with TP/SL Targets,
+ * Smart Market Screener (100 Stocks Table), Interactive Candlestick with TP/SL Targets,
  * 4-Model Probability Gauges, FinBERT News Feed, and AI Auditing.
  */
 
 const TICKERS = [
-  'AAPL', 'MSFT', 'NVDA', 'GOOGL', 'AMZN',
-  'JPM', 'V',
-  'UNH', 'JNJ',
-  'XOM', 'CVX',
-  'PG', 'KO', 'WMT',
-  'MCD', 'NKE',
-  'CAT', 'BA',
-  'NEE', 'LIN'
+  'NVDA', 'AAPL', 'GOOGL', 'GOOG', 'MSFT', 'AMZN', 'META', 'AVGO', 'TSLA', 'BRK-B',
+  'LLY', 'MU', 'WMT', 'JPM', 'AMD', 'V', 'XOM', 'JNJ', 'MA', 'ABBV',
+  'PLTR', 'CVX', 'INTC', 'COST', 'CSCO', 'KO', 'ORCL', 'UNH', 'PG', 'MRK',
+  'BAC', 'HD', 'CAT', 'PM', 'PANW', 'AMAT', 'GE', 'DELL', 'LRCX', 'MS',
+  'NFLX', 'TXN', 'RTX', 'GS', 'TMO', 'WFC', 'IBM', 'AMGN', 'LIN', 'GEV',
+  'ANET', 'AXP', 'CRM', 'C', 'GILD', 'DIS', 'QCOM', 'VZ', 'COP', 'PEP',
+  'SNDK', 'ABT', 'MCD', 'UNP', 'DE', 'BLK', 'PFE', 'NEE', 'NOW', 'ISRG',
+  'TMUS', 'DHR', 'SCHW', 'ACN', 'BA', 'T', 'LMT', 'UBER', 'BMY', 'MO',
+  'COF', 'MDT', 'CVS', 'BKNG', 'SBUX', 'LOW', 'SO', 'ADBE', 'BNY', 'DUK',
+  'GD', 'USB', 'INTU', 'EMR', 'MMM', 'AMT', 'UPS', 'MDLZ', 'CMCSA', 'FDX'
 ];
 
 const SECTOR_MAP_VN = {
   'Technology': 'Công Nghệ',
+  'Communication Services': 'Truyền Thông',
   'Consumer Discretionary': 'Tiêu Dùng',
   'Consumer Staples': 'Hàng Thiết Yếu',
   'Financials': 'Tài Chính',
@@ -25,7 +28,8 @@ const SECTOR_MAP_VN = {
   'Industrials': 'Công Nghiệp',
   'Energy': 'Năng Lượng',
   'Utilities': 'Tiện Ích',
-  'Materials': 'Vật Liệu Cơ Bản'
+  'Materials': 'Vật Liệu Cơ Bản',
+  'Real Estate': 'Bất Động Sản'
 };
 
 let state = {
@@ -262,7 +266,7 @@ function initLightbox() {
   });
 }
 
-// 5. Bộ lọc và tìm kiếm trên Bảng 20 Cổ Phiếu (Smart Screener)
+// 5. Bộ lọc và tìm kiếm trên Bảng 100 Cổ Phiếu (Smart Screener)
 function initScreenerFilters() {
   // Lọc theo Tín hiệu (MUA / BÁN / CHỜ)
   const signalButtons = document.querySelectorAll('#signal-filter-group .filter-chip');
@@ -293,61 +297,116 @@ function initScreenerFilters() {
 // AUTOCOMPLETE SEARCH DIRECTORY & ON-DEMAND EXTENSION
 // ==========================================================================
 const SEARCH_DIRECTORY = [
-  // 20 Cổ phiếu cốt lõi (Có đầy đủ mô hình AI XGBoost, LSTM, FinBERT, Ensemble)
+  // 100 Cổ phiếu cốt lõi S&P 500 (Có đầy đủ mô hình AI XGBoost, LSTM, FinBERT, Ensemble)
+  { ticker: 'NVDA', name: 'NVIDIA Corporation', sector: 'Công nghệ', isCore: true },
   { ticker: 'AAPL', name: 'Apple Inc.', sector: 'Công nghệ', isCore: true },
-  { ticker: 'MSFT', name: 'Microsoft Corp.', sector: 'Công nghệ', isCore: true },
-  { ticker: 'NVDA', name: 'NVIDIA Corp.', sector: 'Công nghệ', isCore: true },
-  { ticker: 'GOOGL', name: 'Alphabet Inc. (Google)', sector: 'Công nghệ', isCore: true },
-  { ticker: 'AMZN', name: 'Amazon.com Inc.', sector: 'Hàng tiêu dùng', isCore: true },
-  { ticker: 'JPM', name: 'JPMorgan Chase & Co.', sector: 'Tài chính', isCore: true },
-  { ticker: 'V', name: 'Visa Inc.', sector: 'Tài chính', isCore: true },
-  { ticker: 'JNJ', name: 'Johnson & Johnson', sector: 'Y tế', isCore: true },
-  { ticker: 'UNH', name: 'UnitedHealth Group', sector: 'Y tế', isCore: true },
-  { ticker: 'XOM', name: 'Exxon Mobil Corp.', sector: 'Năng lượng', isCore: true },
-  { ticker: 'CVX', name: 'Chevron Corp.', sector: 'Năng lượng', isCore: true },
-  { ticker: 'PG', name: 'Procter & Gamble Co.', sector: 'Hàng tiêu dùng', isCore: true },
-  { ticker: 'KO', name: 'Coca-Cola Co.', sector: 'Hàng tiêu dùng', isCore: true },
-  { ticker: 'WMT', name: 'Walmart Inc.', sector: 'Hàng tiêu dùng', isCore: true },
-  { ticker: 'MCD', name: "McDonald's Corp.", sector: 'Hàng tiêu dùng', isCore: true },
-  { ticker: 'NKE', name: 'Nike Inc.', sector: 'Hàng tiêu dùng', isCore: true },
-  { ticker: 'CAT', name: 'Caterpillar Inc.', sector: 'Công nghiệp', isCore: true },
-  { ticker: 'BA', name: 'Boeing Co.', sector: 'Công nghiệp', isCore: true },
-  { ticker: 'NEE', name: 'NextEra Energy Inc.', sector: 'Năng lượng & Tiện ích', isCore: true },
-  { ticker: 'LIN', name: 'Linde plc', sector: 'Công nghiệp', isCore: true },
+  { ticker: 'GOOGL', name: 'Alphabet Inc.', sector: 'Truyền thông & Viễn thông', isCore: true },
+  { ticker: 'GOOG', name: 'Alphabet Inc.', sector: 'Truyền thông & Viễn thông', isCore: true },
+  { ticker: 'MSFT', name: 'Microsoft Corporation', sector: 'Công nghệ', isCore: true },
+  { ticker: 'AMZN', name: 'Amazon.com, Inc.', sector: 'Hàng tiêu dùng không thiết yếu', isCore: true },
+  { ticker: 'META', name: 'Meta Platforms, Inc.', sector: 'Truyền thông & Viễn thông', isCore: true },
+  { ticker: 'AVGO', name: 'Broadcom Inc.', sector: 'Công nghệ', isCore: true },
+  { ticker: 'TSLA', name: 'Tesla, Inc.', sector: 'Hàng tiêu dùng không thiết yếu', isCore: true },
+  { ticker: 'BRK-B', name: 'Berkshire Hathaway Inc. New', sector: 'Tài chính - Ngân hàng', isCore: true },
+  { ticker: 'LLY', name: 'Eli Lilly and Company', sector: 'Y tế & Chăm sóc sức khỏe', isCore: true },
+  { ticker: 'MU', name: 'Micron Technology, Inc.', sector: 'Công nghệ', isCore: true },
+  { ticker: 'WMT', name: 'Walmart Inc.', sector: 'Hàng tiêu dùng thiết yếu', isCore: true },
+  { ticker: 'JPM', name: 'JP Morgan Chase & Co.', sector: 'Tài chính - Ngân hàng', isCore: true },
+  { ticker: 'AMD', name: 'Advanced Micro Devices, Inc.', sector: 'Công nghệ', isCore: true },
+  { ticker: 'V', name: 'Visa Inc.', sector: 'Tài chính - Ngân hàng', isCore: true },
+  { ticker: 'XOM', name: 'ExxonMobil Holdings Corporation', sector: 'Năng lượng & Dầu khí', isCore: true },
+  { ticker: 'JNJ', name: 'Johnson & Johnson', sector: 'Y tế & Chăm sóc sức khỏe', isCore: true },
+  { ticker: 'MA', name: 'Mastercard Incorporated', sector: 'Tài chính - Ngân hàng', isCore: true },
+  { ticker: 'ABBV', name: 'AbbVie Inc.', sector: 'Y tế & Chăm sóc sức khỏe', isCore: true },
+  { ticker: 'PLTR', name: 'Palantir Technologies Inc.', sector: 'Công nghệ', isCore: true },
+  { ticker: 'CVX', name: 'Chevron Corporation', sector: 'Năng lượng & Dầu khí', isCore: true },
+  { ticker: 'INTC', name: 'Intel Corporation', sector: 'Công nghệ', isCore: true },
+  { ticker: 'COST', name: 'Costco Wholesale Corporation', sector: 'Hàng tiêu dùng thiết yếu', isCore: true },
+  { ticker: 'CSCO', name: 'Cisco Systems, Inc.', sector: 'Công nghệ', isCore: true },
+  { ticker: 'KO', name: 'Coca-Cola Company (The)', sector: 'Hàng tiêu dùng thiết yếu', isCore: true },
+  { ticker: 'ORCL', name: 'Oracle Corporation', sector: 'Công nghệ', isCore: true },
+  { ticker: 'UNH', name: 'UnitedHealth Group Incorporated', sector: 'Y tế & Chăm sóc sức khỏe', isCore: true },
+  { ticker: 'PG', name: 'Procter & Gamble Company (The)', sector: 'Hàng tiêu dùng thiết yếu', isCore: true },
+  { ticker: 'MRK', name: 'Merck & Company, Inc.', sector: 'Y tế & Chăm sóc sức khỏe', isCore: true },
+  { ticker: 'BAC', name: 'Bank of America Corporation', sector: 'Tài chính - Ngân hàng', isCore: true },
+  { ticker: 'HD', name: 'Home Depot, Inc. (The)', sector: 'Hàng tiêu dùng không thiết yếu', isCore: true },
+  { ticker: 'CAT', name: 'Caterpillar, Inc.', sector: 'Công nghiệp Chế tạo', isCore: true },
+  { ticker: 'PM', name: 'Philip Morris International Inc', sector: 'Hàng tiêu dùng thiết yếu', isCore: true },
+  { ticker: 'PANW', name: 'Palo Alto Networks, Inc.', sector: 'Công nghệ', isCore: true },
+  { ticker: 'AMAT', name: 'Applied Materials, Inc.', sector: 'Công nghệ', isCore: true },
+  { ticker: 'GE', name: 'GE Aerospace', sector: 'Công nghiệp Chế tạo', isCore: true },
+  { ticker: 'DELL', name: 'Dell Technologies Inc.', sector: 'Công nghệ', isCore: true },
+  { ticker: 'LRCX', name: 'Lam Research Corporation', sector: 'Công nghệ', isCore: true },
+  { ticker: 'MS', name: 'Morgan Stanley', sector: 'Tài chính - Ngân hàng', isCore: true },
+  { ticker: 'NFLX', name: 'Netflix, Inc.', sector: 'Truyền thông & Viễn thông', isCore: true },
+  { ticker: 'TXN', name: 'Texas Instruments Incorporated', sector: 'Công nghệ', isCore: true },
+  { ticker: 'RTX', name: 'RTX Corporation', sector: 'Công nghiệp Chế tạo', isCore: true },
+  { ticker: 'GS', name: 'Goldman Sachs Group, Inc. (The)', sector: 'Tài chính - Ngân hàng', isCore: true },
+  { ticker: 'TMO', name: 'Thermo Fisher Scientific Inc', sector: 'Y tế & Chăm sóc sức khỏe', isCore: true },
+  { ticker: 'WFC', name: 'Wells Fargo & Company', sector: 'Tài chính - Ngân hàng', isCore: true },
+  { ticker: 'IBM', name: 'International Business Machines', sector: 'Công nghệ', isCore: true },
+  { ticker: 'AMGN', name: 'Amgen Inc.', sector: 'Y tế & Chăm sóc sức khỏe', isCore: true },
+  { ticker: 'LIN', name: 'Linde plc', sector: 'Vật liệu Công nghiệp', isCore: true },
+  { ticker: 'GEV', name: 'GE Vernova Inc.', sector: 'Công nghiệp Chế tạo', isCore: true },
+  { ticker: 'ANET', name: 'Arista Networks, Inc.', sector: 'Công nghệ', isCore: true },
+  { ticker: 'AXP', name: 'American Express Company', sector: 'Tài chính - Ngân hàng', isCore: true },
+  { ticker: 'CRM', name: 'Salesforce, Inc.', sector: 'Công nghệ', isCore: true },
+  { ticker: 'C', name: 'Citigroup, Inc.', sector: 'Tài chính - Ngân hàng', isCore: true },
+  { ticker: 'GILD', name: 'Gilead Sciences, Inc.', sector: 'Y tế & Chăm sóc sức khỏe', isCore: true },
+  { ticker: 'DIS', name: 'Walt Disney Company (The)', sector: 'Truyền thông & Viễn thông', isCore: true },
+  { ticker: 'QCOM', name: 'QUALCOMM Incorporated', sector: 'Công nghệ', isCore: true },
+  { ticker: 'VZ', name: 'Verizon Communications Inc.', sector: 'Truyền thông & Viễn thông', isCore: true },
+  { ticker: 'COP', name: 'ConocoPhillips', sector: 'Năng lượng & Dầu khí', isCore: true },
+  { ticker: 'PEP', name: 'Pepsico, Inc.', sector: 'Hàng tiêu dùng thiết yếu', isCore: true },
+  { ticker: 'SNDK', name: 'Sandisk Corporation', sector: 'Công nghệ', isCore: true },
+  { ticker: 'ABT', name: 'Abbott Laboratories', sector: 'Y tế & Chăm sóc sức khỏe', isCore: true },
+  { ticker: 'MCD', name: 'McDonald\'s Corporation', sector: 'Hàng tiêu dùng không thiết yếu', isCore: true },
+  { ticker: 'UNP', name: 'Union Pacific Corporation', sector: 'Công nghiệp Chế tạo', isCore: true },
+  { ticker: 'DE', name: 'Deere & Company', sector: 'Công nghiệp Chế tạo', isCore: true },
+  { ticker: 'BLK', name: 'BlackRock, Inc.', sector: 'Tài chính - Ngân hàng', isCore: true },
+  { ticker: 'PFE', name: 'Pfizer, Inc.', sector: 'Y tế & Chăm sóc sức khỏe', isCore: true },
+  { ticker: 'NEE', name: 'NextEra Energy, Inc.', sector: 'Năng lượng & Tiện ích', isCore: true },
+  { ticker: 'NOW', name: 'ServiceNow, Inc.', sector: 'Công nghệ', isCore: true },
+  { ticker: 'ISRG', name: 'Intuitive Surgical, Inc.', sector: 'Y tế & Chăm sóc sức khỏe', isCore: true },
+  { ticker: 'TMUS', name: 'T-Mobile US, Inc.', sector: 'Truyền thông & Viễn thông', isCore: true },
+  { ticker: 'DHR', name: 'Danaher Corporation', sector: 'Y tế & Chăm sóc sức khỏe', isCore: true },
+  { ticker: 'SCHW', name: 'Charles Schwab Corporation (The', sector: 'Tài chính - Ngân hàng', isCore: true },
+  { ticker: 'ACN', name: 'Accenture plc', sector: 'Công nghệ', isCore: true },
+  { ticker: 'BA', name: 'Boeing Company (The)', sector: 'Công nghiệp Chế tạo', isCore: true },
+  { ticker: 'T', name: 'AT&T Inc.', sector: 'Truyền thông & Viễn thông', isCore: true },
+  { ticker: 'LMT', name: 'Lockheed Martin Corporation', sector: 'Công nghiệp Chế tạo', isCore: true },
+  { ticker: 'UBER', name: 'Uber Technologies, Inc.', sector: 'Công nghệ', isCore: true },
+  { ticker: 'BMY', name: 'Bristol-Myers Squibb Company', sector: 'Y tế & Chăm sóc sức khỏe', isCore: true },
+  { ticker: 'MO', name: 'Altria Group, Inc.', sector: 'Hàng tiêu dùng thiết yếu', isCore: true },
+  { ticker: 'COF', name: 'Capital One Financial Corporati', sector: 'Tài chính - Ngân hàng', isCore: true },
+  { ticker: 'MDT', name: 'Medtronic plc.', sector: 'Y tế & Chăm sóc sức khỏe', isCore: true },
+  { ticker: 'CVS', name: 'CVS Health Corporation', sector: 'Y tế & Chăm sóc sức khỏe', isCore: true },
+  { ticker: 'BKNG', name: 'Booking Holdings Inc. Common St', sector: 'Hàng tiêu dùng không thiết yếu', isCore: true },
+  { ticker: 'SBUX', name: 'Starbucks Corporation', sector: 'Hàng tiêu dùng không thiết yếu', isCore: true },
+  { ticker: 'LOW', name: 'Lowe\'s Companies, Inc.', sector: 'Hàng tiêu dùng không thiết yếu', isCore: true },
+  { ticker: 'SO', name: 'Southern Company (The)', sector: 'Năng lượng & Tiện ích', isCore: true },
+  { ticker: 'ADBE', name: 'Adobe Inc.', sector: 'Công nghệ', isCore: true },
+  { ticker: 'BNY', name: 'The Bank of New York Mellon Cor', sector: 'Tài chính - Ngân hàng', isCore: true },
+  { ticker: 'DUK', name: 'Duke Energy Corporation (Holdin', sector: 'Năng lượng & Tiện ích', isCore: true },
+  { ticker: 'GD', name: 'General Dynamics Corporation', sector: 'Công nghiệp Chế tạo', isCore: true },
+  { ticker: 'USB', name: 'U.S. Bancorp', sector: 'Tài chính - Ngân hàng', isCore: true },
+  { ticker: 'INTU', name: 'Intuit Inc.', sector: 'Công nghệ', isCore: true },
+  { ticker: 'EMR', name: 'Emerson Electric Company', sector: 'Công nghiệp Chế tạo', isCore: true },
+  { ticker: 'MMM', name: '3M Company', sector: 'Công nghiệp Chế tạo', isCore: true },
+  { ticker: 'AMT', name: 'American Tower Corporation (REI', sector: 'Bất động sản', isCore: true },
+  { ticker: 'UPS', name: 'United Parcel Service, Inc.', sector: 'Công nghiệp Chế tạo', isCore: true },
+  { ticker: 'MDLZ', name: 'Mondelez International, Inc.', sector: 'Hàng tiêu dùng thiết yếu', isCore: true },
+  { ticker: 'CMCSA', name: 'Comcast Corporation', sector: 'Truyền thông & Viễn thông', isCore: true },
+  { ticker: 'FDX', name: 'FedEx Corporation', sector: 'Công nghiệp Chế tạo', isCore: true },
 
-  // Cổ phiếu mở rộng thị trường (Có Biểu đồ Nến Live & Tin tức thị trường)
-  // Đặc biệt là các mã bắt đầu bằng chữ T và các Blue-chip S&P 500 / NASDAQ
-  { ticker: 'TSLA', name: 'Tesla Inc.', sector: 'Hàng tiêu dùng / Ô tô điện', isCore: false },
-  { ticker: 'T', name: 'AT&T Inc.', sector: 'Viễn thông & Công nghệ', isCore: false },
-  { ticker: 'TXN', name: 'Texas Instruments Inc.', sector: 'Bán dẫn & Công nghệ', isCore: false },
-  { ticker: 'TMO', name: 'Thermo Fisher Scientific', sector: 'Y tế & Thiết bị', isCore: false },
-  { ticker: 'TMUS', name: 'T-Mobile US Inc.', sector: 'Viễn thông', isCore: false },
-  { ticker: 'TGT', name: 'Target Corporation', sector: 'Hàng tiêu dùng', isCore: false },
-  { ticker: 'META', name: 'Meta Platforms Inc.', sector: 'Công nghệ', isCore: false },
-  { ticker: 'AMD', name: 'Advanced Micro Devices', sector: 'Bán dẫn & Công nghệ', isCore: false },
-  { ticker: 'NFLX', name: 'Netflix Inc.', sector: 'Truyền thông & Giải trí', isCore: false },
-  { ticker: 'INTC', name: 'Intel Corporation', sector: 'Bán dẫn & Công nghệ', isCore: false },
-  { ticker: 'CRM', name: 'Salesforce Inc.', sector: 'Công nghệ', isCore: false },
-  { ticker: 'ADBE', name: 'Adobe Inc.', sector: 'Công nghệ', isCore: false },
-  { ticker: 'ORCL', name: 'Oracle Corporation', sector: 'Công nghệ', isCore: false },
-  { ticker: 'QCOM', name: 'Qualcomm Inc.', sector: 'Bán dẫn & Công nghệ', isCore: false },
-  { ticker: 'AVGO', name: 'Broadcom Inc.', sector: 'Bán dẫn & Công nghệ', isCore: false },
-  { ticker: 'CSCO', name: 'Cisco Systems Inc.', sector: 'Công nghệ', isCore: false },
-  { ticker: 'BAC', name: 'Bank of America Corp.', sector: 'Tài chính', isCore: false },
-  { ticker: 'MA', name: 'Mastercard Inc.', sector: 'Tài chính', isCore: false },
-  { ticker: 'DIS', name: 'Walt Disney Co.', sector: 'Truyền thông & Giải trí', isCore: false },
+  // Cổ phiếu mở rộng ngoài Top 100 (Hỗ trợ On-Demand AI & Biểu đồ Nến Live)
   { ticker: 'PYPL', name: 'PayPal Holdings Inc.', sector: 'Tài chính & Fintech', isCore: false },
-  { ticker: 'UBER', name: 'Uber Technologies Inc.', sector: 'Công nghệ & Vận tải', isCore: false },
-  { ticker: 'PLTR', name: 'Palantir Technologies', sector: 'Trí tuệ nhân tạo (AI)', isCore: false },
   { ticker: 'COIN', name: 'Coinbase Global Inc.', sector: 'Tài chính & Crypto', isCore: false },
   { ticker: 'BABA', name: 'Alibaba Group Holding', sector: 'Thương mại điện tử', isCore: false },
-  { ticker: 'COST', name: 'Costco Wholesale Corp.', sector: 'Hàng tiêu dùng', isCore: false },
+  { ticker: 'TGT', name: 'Target Corporation', sector: 'Hàng tiêu dùng', isCore: false },
   { ticker: 'F', name: 'Ford Motor Co.', sector: 'Hàng tiêu dùng & Ô tô', isCore: false },
   { ticker: 'GM', name: 'General Motors Co.', sector: 'Hàng tiêu dùng & Ô tô', isCore: false },
-  { ticker: 'PFE', name: 'Pfizer Inc.', sector: 'Y tế & Dược phẩm', isCore: false },
-  { ticker: 'LLY', name: 'Eli Lilly and Company', sector: 'Y tế & Dược phẩm', isCore: false },
-  { ticker: 'ABBV', name: 'AbbVie Inc.', sector: 'Y tế & Dược phẩm', isCore: false },
-  { ticker: 'COP', name: 'ConocoPhillips', sector: 'Năng lượng', isCore: false },
+  { ticker: 'NKE', name: 'Nike Inc.', sector: 'Hàng tiêu dùng & Thời trang', isCore: false },
 ];
 
 function highlightMatch(text, query) {
@@ -440,7 +499,7 @@ function setupAutocompleteFlyout(config) {
             </div>
             <div class="sugg-right">
               <span class="sugg-badge ${s.isCore ? 'core' : 'ondemand'}">
-                ${s.isCore ? '⚡ 20 Mã Lõi (AI)' : '📈 Biểu đồ Live'}
+                ${s.isCore ? '⚡ Top 100 S&P (AI)' : '📈 Biểu đồ Live'}
               </span>
               <span class="sugg-arrow">→</span>
             </div>
@@ -778,6 +837,25 @@ async function runOnDemandAnalysis(ticker) {
 }
 window.runOnDemandAnalysis = runOnDemandAnalysis;
 
+function syncSearchDirectoryWithPredictions(predictions) {
+  if (!predictions || !Array.isArray(predictions)) return;
+  predictions.forEach(p => {
+    let item = SEARCH_DIRECTORY.find(i => i.ticker.toUpperCase() === p.ticker.toUpperCase());
+    if (item) {
+      item.isCore = true;
+      if (p.name && !item.name) item.name = p.name;
+      if (p.sector) item.sector = p.sector;
+    } else {
+      SEARCH_DIRECTORY.push({
+        ticker: p.ticker,
+        name: p.name || p.ticker,
+        sector: p.sector || 'Công nghệ',
+        isCore: true
+      });
+    }
+  });
+}
+
 // ==========================================================================
 // DATA FETCHING & SYNCHRONIZATION
 // ==========================================================================
@@ -802,6 +880,7 @@ async function loadAllData() {
   try {
     const marketRes = await fetch('/api/market').then(r => r.json());
     state.marketData = marketRes;
+    syncSearchDirectoryWithPredictions(marketRes?.predictions);
     renderHeaderMarketOverview(marketRes);
     renderTopPicksBanner(marketRes);
     renderScreenerTable(marketRes);
@@ -862,7 +941,7 @@ function updateHeaderActiveTicker() {
 }
 
 // ==========================================================================
-// TAB 1: BẢNG 20 CỔ PHIẾU THÔNG MINH (SMART MARKET SCREENER)
+// TAB 1: BẢNG 100 CỔ PHIẾU THÔNG MINH (SMART MARKET SCREENER)
 // ==========================================================================
 
 // Top Opportunity Spotlight Banner (Top 3 mã MUA)
@@ -920,11 +999,13 @@ function renderTopPicksBanner(market) {
 
 const SECTOR_ALIASES = {
   'tech': ['công nghệ', 'technology', 'tech'],
-  'finance': ['tài chính', 'financials', 'financial services', 'finance', 'ngân hàng'],
-  'health': ['y tế', 'healthcare', 'health', 'chăm sóc sức khỏe'],
-  'consumer': ['tiêu dùng', 'consumer', 'hàng tiêu dùng', 'staples', 'discretionary', 'đồ uống', 'bán lẻ', 'thời trang'],
-  'energy': ['năng lượng', 'energy', 'tiện ích', 'utilities', 'dầu khí'],
-  'industry': ['công nghiệp', 'industrials', 'industry', 'vật liệu', 'materials', 'chế tạo', 'hàng không']
+  'comm': ['truyền thông', 'viễn thông', 'communication', 'media'],
+  'finance': ['tài chính', 'financials', 'financial services', 'finance', 'ngân hàng', 'bank'],
+  'health': ['y tế', 'healthcare', 'health', 'chăm sóc sức khỏe', 'dược phẩm'],
+  'consumer': ['tiêu dùng', 'consumer', 'hàng tiêu dùng', 'staples', 'discretionary', 'đồ uống', 'bán lẻ', 'thời trang', 'thiết yếu'],
+  'energy': ['năng lượng', 'energy', 'tiện ích', 'utilities', 'dầu khí', 'điện'],
+  'industry': ['công nghiệp', 'industrials', 'industry', 'vật liệu', 'materials', 'chế tạo', 'hàng không'],
+  'realestate': ['bất động sản', 'real estate', 'reit']
 };
 
 function matchStockSector(p, filterKey) {
@@ -953,11 +1034,13 @@ function updateFilterChipCounts(preds) {
 
   const sectorMeta = {
     'tech': { icon: '💻', name: 'Công Nghệ' },
+    'comm': { icon: '📡', name: 'Truyền Thông' },
     'finance': { icon: '🏦', name: 'Tài Chính' },
     'health': { icon: '🏥', name: 'Y Tế' },
     'consumer': { icon: '🛒', name: 'Tiêu Dùng' },
-    'energy': { icon: '⚡', name: 'Năng Lượng' },
-    'industry': { icon: '🏭', name: 'Công Nghiệp' }
+    'energy': { icon: '⚡', name: 'Năng Lượng & Tiện Ích' },
+    'industry': { icon: '🏭', name: 'Công Nghiệp' },
+    'realestate': { icon: '🏢', name: 'Bất Động Sản' }
   };
 
   document.querySelectorAll('#sector-filter-group .sector-chip').forEach(btn => {
@@ -1111,7 +1194,7 @@ function applyScreenerFilters() {
             <span class="empty-state-icon">🔍</span>
             <p>${helpMsg}</p>
             <button class="btn-reset-filters" onclick="resetScreenerFilters()">
-              ✕ Xóa Tìm Kiếm & Hiển Thị 20 Mã Mặc Định
+              ✕ Xóa Tìm Kiếm & Hiển Thị Toàn Bộ Cổ Phiếu
             </button>
           </div>
         </td>
@@ -1460,7 +1543,7 @@ function updateTickerPredictions(ticker) {
           <div class="model-status-header">
             <div class="status-type-badge">
               <span class="status-pulse-dot ${isOnDemand ? 'pulse-amber' : 'pulse-green'}"></span>
-              <span class="status-type-text">${isOnDemand ? '⚡ On-Demand Live' : '🛡️ 20 Mã Lõi'}</span>
+              <span class="status-type-text">${isOnDemand ? '⚡ On-Demand Live' : '🛡️ Top 100 S&P'}</span>
               <span class="status-ticker-tag">${ticker}</span>
             </div>
             <div class="status-consensus-badge ${consensusClass}">
@@ -1472,7 +1555,7 @@ function updateTickerPredictions(ticker) {
           <div class="model-mini-stats">
             <span class="stat-cell" title="🌲 XGBoost (Kỹ thuật & Vĩ mô)"><span class="stat-name">XGB</span> <strong class="stat-num">${pred.prob_xgb == null ? 'Không khả dụng' : `${pred.prob_xgb}%`}</strong></span>
             <span class="stat-dot">•</span>
-            <span class="stat-cell" title="🧠 LSTM (Chuỗi Nến 15 Năm)"><span class="stat-name">LSTM</span> <strong class="stat-num">${pred.prob_lstm == null ? 'Không khả dụng' : `${pred.prob_lstm}%`}</strong></span>
+            <span class="stat-cell" title="🧠 LSTM (Chuỗi Nến 5 Năm)"><span class="stat-name">LSTM</span> <strong class="stat-num">${pred.prob_lstm == null ? 'Không khả dụng' : `${pred.prob_lstm}%`}</strong></span>
             <span class="stat-dot">•</span>
             <span class="stat-cell" title="📰 FinBERT — Điểm tín hiệu tin tức"><span class="stat-name">BERT</span> <strong class="stat-num">${pred.prob_bert == null ? 'Không khả dụng' : `${pred.prob_bert}%`}</strong></span>
             <span class="stat-dot">•</span>

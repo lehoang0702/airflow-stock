@@ -59,7 +59,7 @@
         <span class="pill-icon">📈</span> Báo Giá & Biểu Đồ (Quote Summary)
       </button>
       <button class="nav-pill-btn" data-tab="tab-screener">
-        <span class="pill-icon">🎯</span> Bảng 20 Cổ Phiếu & Tín Hiệu Mua/Bán (Screener)
+        <span class="pill-icon">🎯</span> Bảng 100 Cổ Phiếu & Tín Hiệu Mua/Bán (Screener)
       </button>
       <button class="nav-pill-btn" data-tab="tab-audit">
         <span class="pill-icon">🛡️</span> Thẩm Định Thuật Toán & Kiểm Định Dữ Liệu (MLOps)
@@ -292,7 +292,7 @@
 
               <div class="gauge-item">
                 <div class="gauge-labels">
-                  <span>🧠 PP2: LSTM (Chuỗi Nến 15 Năm)</span>
+                  <span>🧠 PP2: LSTM (Chuỗi Nến 5 Năm)</span>
                   <span id="side-lstm-val" class="gauge-pct">Chưa có kết quả</span>
                 </div>
                 <div class="gauge-bar-bg">
@@ -328,7 +328,7 @@
     </section>
 
     <!-- ================================================================= -->
-    <!-- TAB 2: SMART MARKET SCREENER (BẢNG 20 MÃ CỔ PHIẾU THÔNG MINH)   -->
+    <!-- TAB 2: SMART MARKET SCREENER (BẢNG 100 MÃ CỔ PHIẾU THÔNG MINH)  -->
     <!-- ================================================================= -->
     <section id="tab-screener" class="tab-panel">
       <!-- Top Opportunity Spotlight Banner -->
@@ -354,7 +354,7 @@
           <!-- Search input with Autocomplete Suggestions Dropdown -->
           <div class="search-box" id="search-box-wrap" style="position: relative; z-index: 502;">
             <span class="search-icon">🔍</span>
-            <input type="text" id="screener-search-input" placeholder="Nhập mã (TSLA, AAPL, T...) hoặc tên công ty..." autocomplete="off" />
+            <input type="text" id="screener-search-input" placeholder="Nhập mã (NVDA, AAPL, TSLA...) hoặc tên công ty..." autocomplete="off" />
             <button class="search-clear-btn" id="search-clear-btn" title="Xóa tìm kiếm">&times;</button>
             <div class="search-suggestions-dropdown hidden" id="search-suggestions-dropdown"></div>
           </div>
@@ -362,23 +362,25 @@
           <!-- Quick Signal Filter Chips -->
           <div class="filter-chips-group" id="signal-filter-group">
             <span class="filter-label">LỌC TÍN HIỆU:</span>
-            <button class="filter-chip active" data-filter="all" id="filter-chip-all">Tất Cả (20)</button>
-            <button class="filter-chip filter-buy" data-filter="buy" id="filter-chip-buy">🟢 Khuyến Nghị MUA (0)</button>
-            <button class="filter-chip filter-hold" data-filter="hold" id="filter-chip-hold">🟡 Theo Dõi (19)</button>
-            <button class="filter-chip filter-sell" data-filter="sell" id="filter-chip-sell">🔴 Cảnh Báo BÁN (1)</button>
+            <button class="filter-chip active" data-filter="all" id="filter-chip-all">Tất Cả</button>
+            <button class="filter-chip filter-buy" data-filter="buy" id="filter-chip-buy">🟢 Khuyến Nghị MUA</button>
+            <button class="filter-chip filter-hold" data-filter="hold" id="filter-chip-hold">🟡 Theo Dõi</button>
+            <button class="filter-chip filter-sell" data-filter="sell" id="filter-chip-sell">🔴 Cảnh Báo BÁN</button>
           </div>
         </div>
 
         <!-- Sector Filter Chips -->
         <div class="sector-chips-row" id="sector-filter-group">
           <span class="filter-label">NHÓM NGÀNH:</span>
-          <button class="sector-chip active" data-sector="all">Tất Cả Ngành (20)</button>
-          <button class="sector-chip" data-sector="tech">💻 Công Nghệ (4)</button>
-          <button class="sector-chip" data-sector="finance">🏦 Tài Chính (2)</button>
-          <button class="sector-chip" data-sector="health">🏥 Y Tế (2)</button>
-          <button class="sector-chip" data-sector="consumer">🛒 Tiêu Dùng (6)</button>
-          <button class="sector-chip" data-sector="energy">⚡ Năng Lượng (3)</button>
-          <button class="sector-chip" data-sector="industry">🏭 Công Nghiệp (3)</button>
+          <button class="sector-chip active" data-sector="all">Tất Cả Ngành</button>
+          <button class="sector-chip" data-sector="tech">💻 Công Nghệ</button>
+          <button class="sector-chip" data-sector="comm">📡 Truyền Thông</button>
+          <button class="sector-chip" data-sector="finance">🏦 Tài Chính</button>
+          <button class="sector-chip" data-sector="health">🏥 Y Tế</button>
+          <button class="sector-chip" data-sector="consumer">🛒 Tiêu Dùng</button>
+          <button class="sector-chip" data-sector="industry">🏭 Công Nghiệp</button>
+          <button class="sector-chip" data-sector="energy">⚡ Năng Lượng & Tiện Ích</button>
+          <button class="sector-chip" data-sector="realestate">🏢 Bất Động Sản</button>
         </div>
       </div>
 
@@ -401,14 +403,14 @@
             </thead>
             <tbody id="screener-table-body">
               <tr>
-                <td colspan="9" class="table-loading">Đang tải dữ liệu phân tích 20 mã cổ phiếu từ MinIO S3...</td>
+                <td colspan="9" class="table-loading">Đang tải dữ liệu phân tích 100 mã cổ phiếu từ MinIO S3...</td>
               </tr>
             </tbody>
           </table>
         </div>
         <div class="table-footer-info">
           <span>💡 <strong>Mẹo:</strong> Nhấp vào bất kỳ hàng cổ phiếu nào ở trên để mở ngay trang phân tích chi tiết chuẩn Yahoo Finance.</span>
-          <span id="screener-records-count">Hiển thị 20/20 cổ phiếu</span>
+          <span id="screener-records-count">Đang tải danh sách 100 cổ phiếu...</span>
         </div>
       </div>
     </section>
